@@ -16,7 +16,10 @@ gc = gspread.service_account_from_dict(credentials)
 @st.cache_data(ttl=5)
 def load_data_from_google():
     try:
-        gc = gspread.service_account(filename=json_path)
+        # 클라우드 금고(Secrets)에서 바로 열쇠를 꺼내옵니다.
+        credentials = st.secrets["google_credentials"]
+        gc = gspread.service_account_from_dict(credentials)
+        
         sh = gc.open_by_key(spreadsheet_id)
         worksheets = sh.worksheets()
         all_data = {ws.title: pd.DataFrame(ws.get_all_records()) for ws in worksheets if ws.get_all_records()}
@@ -76,3 +79,4 @@ if etf_data:
 else:
 
     st.warning("데이터가 없습니다.")
+
