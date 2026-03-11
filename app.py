@@ -9,9 +9,9 @@ st.set_page_config(page_title="ETF 전종목 비중 추적", layout="wide")
 st.title("📈 ETF 종목별 비중 변화 (20개 종목 전체)")
 
 # 2. 구글 시트 연결
-home = os.path.expanduser("~")
-json_path = os.path.join(home, "Desktop", "google_key.json")
-spreadsheet_id = "1ZxIYeERuOWOWZudyjpMWpEWA0eljOct_uO9gXg6_2JA"
+# 기존 3줄을 지우고 아래 2줄로 바꿔주세요
+credentials = st.secrets["google_credentials"]
+gc = gspread.service_account_from_dict(credentials)
 
 @st.cache_data(ttl=5)
 def load_data_from_google():
@@ -74,4 +74,5 @@ if etf_data:
         st.dataframe(df)
 
 else:
+
     st.warning("데이터가 없습니다.")
