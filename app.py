@@ -64,7 +64,7 @@ if etf_data:
         category_orders={df.columns[1]: sorted_stocks}
     )
 
-    # [핵심 수정] 정보창(Hover)이 화면을 벗어나지 않도록 하고, 가독성 높이기
+    # [수정] 레이아웃 최적화: 범례 중앙 정렬 및 고정형 설정
     fig.update_layout(
         yaxis=dict(
             range=[0, df[df.columns[2]].max() * 1.1], 
@@ -75,28 +75,35 @@ if etf_data:
             title="날짜/시간",
             fixedrange=True
         ),
-        height=800, # 핸드폰에서 더 길게 보이도록 높이 약간 추가
+        height=700, 
         legend=dict(
             title="종목명(비중순)", 
             orientation="v", 
-            yanchor="top", 
-            y=1, 
+            yanchor="middle", # 범례를 세로 기준 중앙에 배치
+            y=0.5,            # 중앙 좌표값
             xanchor="left", 
             x=1.02,
-            itemclick="toggle", # 클릭 시 해당 종목만 켜고 끄기 가능
-            itemdoubleclick="toggleothers" # 더블클릭 시 해당 종목만 보기
+            itemclick="toggle",
+            itemdoubleclick="toggleothers"
         ),
-        # 정보창 설정 변경
-        hovermode="closest", # 'x unified' 대신 'closest'를 사용하여 손가락이 닿은 종목 정보만 깔끔하게 표시
+        hovermode="closest",
         dragmode=False
     )
 
-    # 툴바 숨기기 및 레이아웃 최적화
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     
-    st.info(f"💡 팁: 오른쪽 종목명을 '한 번' 누르면 숨기기, '두 번' 누르면 그 종목만 볼 수 있습니다.")
+    # 4. [복구] 하단 상세 데이터 테이블
+    st.subheader("📋 일자별 종목 구성 상세")
+    
+    # 테이블용 데이터 정리 (최신순 정렬)
+    display_df = df.sort_values(by=[df.columns[0], df.columns[2]], ascending=[False, False])
+    # 날짜 형식을 보기 좋게 변환
+    display_df[df.columns[0]] = display_df[df.columns[0]].dt.strftime('%Y-%m-%d %H:%M')
+    
+    st.dataframe(display_df, use_container_width=True, height=400)
 
 else:
     st.warning("데이터가 없습니다.")
+
 
 
