@@ -54,26 +54,38 @@ if etf_data:
     df['순위'] = df.groupby(date_col_name)[weight_col_name].rank(method='min', ascending=False)
 
     # 3. 그래프 그리기
-    st.subheader(f"📅 {selected_etf} 실시간 비중 추이")
+    st.subheader(f"📅 {selected_etf} 실시간 순위 변동 추이")
 
     fig = px.line(
         df, 
-        x=df.columns[0], 
-        y=df.columns[2], 
-        color=df.columns[1], 
+        x=date_col_name, 
+        y='순위',                # 🛠️ [복구] 다시 '순위'를 기준으로 간격을 쫙 펴줍니다!
+        color=name_col_name, 
         markers=True,
-        hover_name=df.columns[1]
+        hover_name=name_col_name,
+        hover_data={
+            weight_col_name: True,   # 마우스 올렸을 때 실제 '비중(%)' 나오게 하기
+            '순위': True,            
+            date_col_name: False,
+            name_col_name: False
+        }
     )
 
     fig.update_layout(
-        yaxis=dict(range=[0, df[df.columns[2]].max() * 1.1], title="비중 (%)"),
+        yaxis=dict(
+            autorange="reversed",    # 🛠️ [복구] 1등이 꼭대기로 가도록 뒤집기
+            title="순위 (등)",
+            tickmode='linear',
+            tick0=1,
+            dtick=1
+        ),
         xaxis_title="날짜",
-        height=750,
+        height=800,
         
-        # 🛠️ [수리 포인트 1] 종목 이름표(범례)를 정중앙으로 예쁘게 내렸습니다! (middle, 0.5)
+        # 🛠️ [수리 1] 범례(이름표)는 붕 뜨지 않게 그래프 정중앙(middle, 0.5)에 안착!
         legend=dict(title="종목명", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02),
         
-        # 🛠️ [수리 포인트 2] 마우스를 올린 딱 '그 종목'의 비중만 깔끔하게 나오도록 교체!
+        # 🛠️ [수리 2] 마우스 올리면 전체가 뜨는 게 아니라 딱 '그 종목'만 깔끔하게 톡!
         hovermode="closest"
     )
 
