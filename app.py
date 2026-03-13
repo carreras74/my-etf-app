@@ -54,35 +54,27 @@ if etf_data:
     df['순위'] = df.groupby(date_col_name)[weight_col_name].rank(method='min', ascending=False)
 
     # 3. 그래프 그리기
-    st.subheader(f"📅 {selected_etf} 실시간 순위 변동 추이")
+    st.subheader(f"📅 {selected_etf} 실시간 비중 추이")
 
     fig = px.line(
         df, 
-        x=date_col_name, 
-        y='순위',                
-        color=name_col_name, 
+        x=df.columns[0], 
+        y=df.columns[2], 
+        color=df.columns[1], 
         markers=True,
-        hover_name=name_col_name,
-        hover_data={
-            weight_col_name: True,   
-            '순위': True,            
-            date_col_name: False,
-            name_col_name: False
-        }
+        hover_name=df.columns[1]
     )
 
     fig.update_layout(
-        yaxis=dict(
-            autorange="reversed", 
-            title="순위 (등)",
-            tickmode='linear',
-            tick0=1,
-            dtick=1
-        ),
+        yaxis=dict(range=[0, df[df.columns[2]].max() * 1.1], title="비중 (%)"),
         xaxis_title="날짜",
-        height=800,
-        legend=dict(title="종목명", orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
-        hovermode="x unified"
+        height=750,
+        
+        # 🛠️ [수리 포인트 1] 종목 이름표(범례)를 정중앙으로 예쁘게 내렸습니다! (middle, 0.5)
+        legend=dict(title="종목명", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02),
+        
+        # 🛠️ [수리 포인트 2] 마우스를 올린 딱 '그 종목'의 비중만 깔끔하게 나오도록 교체!
+        hovermode="closest"
     )
 
     st.plotly_chart(fig, use_container_width=True)
