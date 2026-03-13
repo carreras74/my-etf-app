@@ -53,18 +53,25 @@ if etf_data:
     
     df['순위'] = df.groupby(date_col_name)[weight_col_name].rank(method='min', ascending=False)
 
+    # -------------------------------------------------------------
+    # 🛠️ [수리 포인트 1] 가장 최근 날짜를 기준으로 비중 1등부터 줄 세우는 부품!
+    latest_date = df[date_col_name].max()
+    latest_order = df[df[date_col_name] == latest_date].sort_values(by=weight_col_name, ascending=False)[name_col_name].tolist()
+    # -------------------------------------------------------------
+
     # 3. 그래프 그리기
     st.subheader(f"📅 {selected_etf} 실시간 순위 변동 추이")
 
     fig = px.line(
         df, 
         x=date_col_name, 
-        y='순위',                # 🛠️ [복구] 다시 '순위'를 기준으로 간격을 쫙 펴줍니다!
+        y='순위',                
         color=name_col_name, 
         markers=True,
         hover_name=name_col_name,
+        category_orders={name_col_name: latest_order}, # 🛠️ [적용 1] 추출된 최신 비중 순서대로 범례 진열장 정렬!
         hover_data={
-            weight_col_name: True,   # 마우스 올렸을 때 실제 '비중(%)' 나오게 하기
+            weight_col_name: True,   
             '순위': True,            
             date_col_name: False,
             name_col_name: False
@@ -73,19 +80,26 @@ if etf_data:
 
     fig.update_layout(
         yaxis=dict(
-            autorange="reversed",    # 🛠️ [복구] 1등이 꼭대기로 가도록 뒤집기
+            autorange="reversed",    
             title="순위 (등)",
             tickmode='linear',
             tick0=1,
-            dtick=1
+            dtick=1,
+            fixedrange=True          # 🛠️ [수리 포인트 2] 세로축 마우스 드래그 줌(Zoom) 꽉 잠그기!
         ),
-        xaxis_title="날짜",
+        xaxis=dict(
+            title="날짜",
+            fixedrange=True          # 🛠️ [수리 포인트 2] 가로축 마우스 드래그 줌(Zoom) 꽉 잠그기!
+        ),
         height=800,
-        
-        # 🛠️ [수리 1] 범례(이름표)는 붕 뜨지 않게 그래프 정중앙(middle, 0.5)에 안착!
-        legend=dict(title="종목명", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02),
-        
-        # 🛠️ [수리 2] 마우스 올리면 전체가 뜨는 게 아니라 딱 '그 종목'만 깔끔하게 톡!
+        legend=dict(
+            title="종목명", 
+            orientation="v", 
+            yanchor="middle", 
+            y=0.5, 
+            xanchor="left", 
+            x=1.02
+        ),
         hovermode="closest"
     )
 
