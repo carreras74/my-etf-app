@@ -11,7 +11,7 @@ st.title("📈 ETF 종목별 순위 변동 추이 (범프 차트)")
 # 2. 구글 시트 연결 (스트림릿 클라우드 비밀금고 사용)
 spreadsheet_id = "1ZxIYeERuOWOWZudyjpMWpEWA0eljOct_uO9gXg6_2JA"
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=3600)
 def load_data_from_google():
     try:
         # 💡 [핵심] 바탕화면 파일 대신, 스트림릿 비밀금고에서 열쇠를 가져옵니다.
