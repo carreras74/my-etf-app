@@ -2,21 +2,22 @@ import streamlit as st
 import gspread
 import pandas as pd
 import plotly.express as px
-import os
+import json # json 모듈 추가
 
 # 1. 페이지 설정
 st.set_page_config(page_title="ETF 전종목 비중 추적", layout="wide")
 st.title("📈 ETF 종목별 순위 변동 추이 (범프 차트)")
 
-# 2. 구글 시트 연결
-home = os.path.expanduser("~")
-json_path = os.path.join(home, "Desktop", "google_key.json")
+# 2. 구글 시트 연결 (스트림릿 클라우드 비밀금고 사용)
 spreadsheet_id = "1ZxIYeERuOWOWZudyjpMWpEWA0eljOct_uO9gXg6_2JA"
 
 @st.cache_data(ttl=5)
 def load_data_from_google():
     try:
-        gc = gspread.service_account(filename=json_path)
+        # 💡 [핵심] 바탕화면 파일 대신, 스트림릿 비밀금고에서 열쇠를 가져옵니다.
+        creds_json = json.loads(st.secrets["google_key"])
+        gc = gspread.service_account_from_dict(creds_json)
+        
         sh = gc.open_by_key(spreadsheet_id)
         worksheets = sh.worksheets()
         all_data = {ws.title: pd.DataFrame(ws.get_all_records()) for ws in worksheets if ws.get_all_records()}
@@ -45,16 +46,12 @@ if etf_data:
     df[df.columns[2]] = pd.to_numeric(df[df.columns[2]], errors='coerce')
     df = df.dropna().sort_values(by=df.columns[0])
     
-    # -------------------------------------------------------------
-    # 💡 [핵심 추가 코드] 날짜별로 비중에 따른 '순위' 계산
-    # method='min': 동일 비중일 경우 같은 등수 부여, ascending=False: 높은 숫자가 1등
-    # -------------------------------------------------------------
+    # 날짜별로 비중에 따른 '순위' 계산
     date_col_name = df.columns[0]
     name_col_name = df.columns[1]
     weight_col_name = df.columns[2]
     
     df['순위'] = df.groupby(date_col_name)[weight_col_name].rank(method='min', ascending=False)
-    # -------------------------------------------------------------
 
     # 3. 그래프 그리기
     st.subheader(f"📅 {selected_etf} 실시간 순위 변동 추이")
@@ -62,20 +59,19 @@ if etf_data:
     fig = px.line(
         df, 
         x=date_col_name, 
-        y='순위',                # y축을 '비중'에서 '순위'로 변경
+        y='순위',                
         color=name_col_name, 
         markers=True,
         hover_name=name_col_name,
         hover_data={
-            weight_col_name: True,   # 마우스를 올렸을 때 실제 '비중(%)' 표시
-            '순위': True,            # 순위도 표시
+            weight_col_name: True,   
+            '순위': True,            
             date_col_name: False,
             name_col_name: False
         }
     )
 
     fig.update_layout(
-        # 💡 [핵심 추가 코드] 1등이 맨 위로 오도록 축을 뒤집고, 1단위로 눈금 표시
         yaxis=dict(
             autorange="reversed", 
             title="순위 (등)",
@@ -94,7 +90,6 @@ if etf_data:
     # 4. 종목 리스트 및 데이터 확인
     st.info(f"✅ 총 {len(df[name_col_name].unique())}개 종목이 그래프에 표시되고 있습니다.")
     with st.expander("데이터 표 보기"):
-        # 표에서 볼 때는 순위도 같이 보이도록 정렬
         st.dataframe(df.sort_values(by=[date_col_name, '순위']))
 
 else:
