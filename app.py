@@ -60,19 +60,19 @@ if etf_data:
     # -------------------------------------------------------------
 
     # 3. 그래프 그리기
-    st.subheader(f"📅 {selected_etf} 실시간 순위 변동 추이")
+    st.subheader(f"📅 {selected_etf} 실시간 비중 변동 추이 (상세 확대 모드)")
 
     fig = px.line(
         df, 
         x=date_col_name, 
-        y='순위',                
+        y=weight_col_name,       # 🛠️ [수리 포인트 1] Y축을 '순위'에서 다시 '비중'으로 원상복구하여 고저차를 살립니다!
         color=name_col_name, 
         markers=True,
         hover_name=name_col_name,
-        category_orders={name_col_name: latest_order}, # 🛠️ [적용 1] 추출된 최신 비중 순서대로 범례 진열장 정렬!
+        category_orders={name_col_name: latest_order}, 
         hover_data={
             weight_col_name: True,   
-            '순위': True,            
+            '순위': True,            # 마우스를 올리면 계산해둔 '순위'는 여전히 예쁘게 뜹니다!
             date_col_name: False,
             name_col_name: False
         }
@@ -80,16 +80,15 @@ if etf_data:
 
     fig.update_layout(
         yaxis=dict(
-            autorange="reversed",    
-            title="순위 (등)",
-            tickmode='linear',
-            tick0=1,
-            dtick=1,
-            fixedrange=True          # 🛠️ [수리 포인트 2] 세로축 마우스 드래그 줌(Zoom) 꽉 잠그기!
+            type="log",              # 🛠️ [수리 포인트 2] 마법의 '로그 스케일' 나사 체결! (1~3% 구간을 쫙 늘려줍니다)
+            title="비중 (%)",
+            # 🛠️ [수리 포인트 3] 대표님이 원하신 '등분(눈금)'을 1~5% 구간에 아주 촘촘하게 쪼개서 그어줍니다!
+            tickvals=[1, 1.5, 2, 2.5, 3, 4, 5, 7, 10, 15, 20], 
+            fixedrange=True          
         ),
         xaxis=dict(
             title="날짜",
-            fixedrange=True          # 🛠️ [수리 포인트 2] 가로축 마우스 드래그 줌(Zoom) 꽉 잠그기!
+            fixedrange=True          
         ),
         height=800,
         legend=dict(
@@ -104,7 +103,6 @@ if etf_data:
     )
 
     st.plotly_chart(fig, use_container_width=True)
-
     # 4. 종목 리스트 및 데이터 확인
     st.info(f"✅ 총 {len(df[name_col_name].unique())}개 종목이 그래프에 표시되고 있습니다.")
     with st.expander("데이터 표 보기"):
