@@ -2,7 +2,7 @@ import streamlit as st
 import gspread
 import pandas as pd
 import plotly.express as px
-import json # json 모듈 추가
+import json
 
 # 1. 페이지 설정
 st.set_page_config(page_title="ETF 전종목 비중 추적", layout="wide")
@@ -14,7 +14,6 @@ spreadsheet_id = "1ZxIYeERuOWOWZudyjpMWpEWA0eljOct_uO9gXg6_2JA"
 @st.cache_data(ttl=3600)
 def load_data_from_google():
     try:
-        # 💡 [핵심] 바탕화면 파일 대신, 스트림릿 비밀금고에서 열쇠를 가져옵니다.
         creds_json = json.loads(st.secrets["google_key"])
         gc = gspread.service_account_from_dict(creds_json)
         
@@ -53,11 +52,9 @@ if etf_data:
     
     df['순위'] = df.groupby(date_col_name)[weight_col_name].rank(method='min', ascending=False)
 
-    # -------------------------------------------------------------
-    # 🛠️ [수리 포인트 1] 가장 최근 날짜를 기준으로 비중 1등부터 줄 세우는 부품!
-    latest_date = df[date_col_name].max()
-    latest_order = df[df[date_col_name] == latest_date].sort_values(by=weight_col_name, ascending=False)[name_col_name].tolist()
-    # -------------------------------------------------------------
+    # 🛠️ [수리 완료 1] missing 되었던 latest_order (최신일자 기준 순위 정렬) 복구!
+    latest_date_val = df[date_col_name].max()
+    latest_order = df[df[date_col_name] == latest_date_val].sort_values(by=weight_col_name, ascending=False)[name_col_name].tolist()
 
     # 3. 그래프 그리기
     st.subheader(f"📅 {selected_etf} 실시간 비중 변동 추이 (상세 확대 모드)")
@@ -65,14 +62,14 @@ if etf_data:
     fig = px.line(
         df, 
         x=date_col_name, 
-        y=weight_col_name,       # 🛠️ [수리 포인트 1] Y축을 '순위'에서 다시 '비중'으로 원상복구하여 고저차를 살립니다!
+        y=weight_col_name,       
         color=name_col_name, 
         markers=True,
         hover_name=name_col_name,
         category_orders={name_col_name: latest_order}, 
         hover_data={
             weight_col_name: True,   
-            '순위': True,            # 마우스를 올리면 계산해둔 '순위'는 여전히 예쁘게 뜹니다!
+            '순위': True,            
             date_col_name: False,
             name_col_name: False
         }
@@ -86,7 +83,7 @@ if etf_data:
             fixedrange=True          
         ),
         xaxis=dict(
-            type="category",         # 🛠️ [핵심 수리 포인트] X축을 '시간의 흐름'이 아닌 '칸칸이 박스(카테고리)'로 강제 변환!
+            type="category",         
             title="날짜",
             fixedrange=True          
         ),
@@ -101,7 +98,9 @@ if etf_data:
         ),
         hovermode="closest"
     )
+
     st.plotly_chart(fig, use_container_width=True)
+
     # 4. 종목 리스트 및 데이터 확인
     st.info(f"✅ 총 {len(df[name_col_name].unique())}개 종목이 그래프에 표시되고 있습니다.")
     with st.expander("데이터 표 보기"):
@@ -109,6 +108,7 @@ if etf_data:
 
 else:
     st.warning("데이터가 없습니다.")
+
 
 # =====================================================================
 # 📊 [자동화 엔진] 5영업일 누적 매집 찐 주도주 바 차트 (TIME / KoAct)
@@ -156,11 +156,15 @@ for etf_name, raw_df in etf_data.items():
         v_3d = pd.to_numeric(row_3d[col], errors='coerce'); v_3d = v_3d if pd.notna(v_3d) else 0.0
         v_5d = pd.to_numeric(row_5d[col], errors='coerce'); v_5d = v_5d if pd.notna(v_5d) else 0.0
         
+        # 🛠️ [수리 완료 2] KoAct 데이터 소수점 스케일링 복구!
+        if category == "KoAct" and 0 < l_val < 1.0:
+            l_val *= 100; v_1d *= 100; v_3d *= 100; v_5d *= 100
+
         diff_1d = l_val - v_1d
         diff_3d = l_val - v_3d
         diff_5d = l_val - v_5d
         
-        if diff_5d > 0.001 or diff_1d > 0.001: # 조금이라도 상승한 이력이 있는 녀석만 수집
+        if diff_5d > 0.001 or diff_1d > 0.001: 
             record = {
                 '기준일자': latest_date, 
                 '표시명': f"{col}<br>({etf_short})",
@@ -208,7 +212,7 @@ def draw_top20_bar_chart(records, category_name, color_map):
 color_time = {'5영업일변화(%p)': '#FFBB78', '3영업일변화(%p)': '#FF7F0E', '당일변화(%p)': '#D62728'}
 draw_top20_bar_chart(time_records, "TIME", color_time)
 
-st.markdown("<br><br>", unsafe_allow_html=True) # 차트 사이 여유 공간
+st.markdown("<br><br>", unsafe_allow_html=True)
 
 color_koact = {'5영업일변화(%p)': '#AEC7E8', '3영업일변화(%p)': '#1F77B4', '당일변화(%p)': '#17BECF'}
 draw_top20_bar_chart(koact_records, "KoAct", color_koact)
