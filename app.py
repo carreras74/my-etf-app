@@ -78,15 +78,15 @@ if etf_data:
         }
     )
 
-    fig.update_layout(
+fig.update_layout(
         yaxis=dict(
-            type="log",              # 🛠️ [수리 포인트 2] 마법의 '로그 스케일' 나사 체결! (1~3% 구간을 쫙 늘려줍니다)
+            type="log",              
             title="비중 (%)",
-            # 🛠️ [수리 포인트 3] 대표님이 원하신 '등분(눈금)'을 1~5% 구간에 아주 촘촘하게 쪼개서 그어줍니다!
             tickvals=[1, 1.5, 2, 2.5, 3, 4, 5, 7, 10, 15, 20], 
             fixedrange=True          
         ),
         xaxis=dict(
+            type="category",         # 🛠️ [핵심 수리 포인트] X축을 '시간의 흐름'이 아닌 '칸칸이 박스(카테고리)'로 강제 변환!
             title="날짜",
             fixedrange=True          
         ),
@@ -101,7 +101,6 @@ if etf_data:
         ),
         hovermode="closest"
     )
-
     st.plotly_chart(fig, use_container_width=True)
     # 4. 종목 리스트 및 데이터 확인
     st.info(f"✅ 총 {len(df[name_col_name].unique())}개 종목이 그래프에 표시되고 있습니다.")
