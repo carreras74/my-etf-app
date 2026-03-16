@@ -78,7 +78,7 @@ if etf_data:
         }
     )
 
-fig.update_layout(
+    fig.update_layout(
         yaxis=dict(
             type="log",              
             title="비중 (%)",
