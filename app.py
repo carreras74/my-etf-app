@@ -29,6 +29,8 @@ etf_data = load_data_from_google()
 
 if etf_data:
     selected_etf = st.sidebar.selectbox("ETF 선택", list(etf_data.keys()))
+    
+    # 💡 [핵심] raw_df가 바로 구글 시트 원본 그 자체입니다!
     raw_df = etf_data[selected_etf].copy()
 
     if len(raw_df.columns) > 3:
@@ -74,7 +76,6 @@ if etf_data:
     )
 
     fig.update_layout(
-        # 💡 [핵심 패치] fixedrange=True 자물쇠를 풀었습니다! 이제 마우스로 드래그해서 마음껏 줌인/아웃 하세요!
         yaxis=dict(type="log", title="비중 (%)", tickvals=[1, 1.5, 2, 2.5, 3, 4, 5, 7, 10, 15, 20]),
         xaxis=dict(type="category", title="날짜"),
         height=800,
@@ -83,10 +84,15 @@ if etf_data:
     )
 
     st.plotly_chart(fig, use_container_width=True)
-
     st.info(f"✅ 총 {len(df[name_col_name].unique())}개 종목이 그래프에 표시되고 있습니다.")
-    with st.expander("데이터 표 보기"):
-        st.dataframe(df.sort_values(by=[date_col_name, '순위']))
+    
+    # =====================================================================
+    # 💡 [핵심 패치] 차트 바로 밑에 '구글 시트 원본 뷰어'를 달아드렸습니다!
+    # =====================================================================
+    with st.expander("📊 구글 시트 원본 데이터 펴보기 (종목별 수량증감 상세 조회)"):
+        st.markdown("**💡 구글 시트와 동일한 원본 데이터입니다. 표 안에서 스크롤하거나 우측 상단의 확대 버튼을 누르시면 더 크게 볼 수 있습니다.**")
+        # 구글 시트 원본 형태(raw_df)를 그대로 예쁘게 그려줍니다.
+        st.dataframe(raw_df, use_container_width=True, hide_index=True)
 
 else:
     st.warning("데이터가 없습니다.")
