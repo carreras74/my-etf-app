@@ -31,33 +31,25 @@ if etf_data:
     selected_etf = st.sidebar.selectbox("ETF 선택", list(etf_data.keys()))
     raw_df = etf_data[selected_etf].copy()
 
-    # 💡 [핵심 패치 1] 비중 데이터와 '_증감' 데이터를 분리해서 엮어주는 로직
     if len(raw_df.columns) > 3:
         date_col = raw_df.columns[0]
-        
-        # 순수 종목명만 추출 (Date 제외, '_증감' 붙은 것 제외)
         stock_cols = [c for c in raw_df.columns if c != date_col and not str(c).endswith('_증감')]
         
-        # 1. 비중 데이터만 녹이기
         df_weight = raw_df[[date_col] + stock_cols].copy()
         df_weight = df_weight.melt(id_vars=[date_col], var_name='종목명', value_name='비중')
         
-        # 2. 수량 증감 데이터만 녹이기
         change_cols = [f"{c}_증감" for c in stock_cols if f"{c}_증감" in raw_df.columns]
         df_change = raw_df[[date_col] + change_cols].copy()
-        
-        # 두 표를 합치기 위해 컬럼명에서 '_증감' 글씨 떼기
         df_change.columns = [date_col] + [c.replace('_증감', '') for c in change_cols]
         df_change = df_change.melt(id_vars=[date_col], var_name='종목명', value_name='수량증감')
         
-        # 3. 비중과 수량증감을 하나의 표로 완벽하게 합체!
         df = pd.merge(df_weight, df_change, on=[date_col, '종목명'], how='left')
         
     else:
         df = raw_df.copy()
         date_col, name_col, weight_col = df.columns[0], df.columns[1], df.columns[2]
         df.columns = ['일자', '종목명', '비중']
-        df['수량증감'] = "-" # 과거 데이터 예외 처리
+        df['수량증감'] = "-" 
         date_col, name_col, weight_col = '일자', '종목명', '비중'
 
     df[df.columns[0]] = pd.to_datetime(df[df.columns[0]])
@@ -75,7 +67,6 @@ if etf_data:
 
     st.subheader(f"📅 {selected_etf} 실시간 비중 변동 추이 (상세 확대 모드)")
 
-    # 💡 [핵심 패치 2] 차트 호버(툴팁)에 '수량증감'을 띄우도록 옵션 추가!
     fig = px.line(
         df, x=date_col_name, y=weight_col_name, color=name_col_name, markers=True,
         hover_name=name_col_name, category_orders={name_col_name: latest_order}, 
@@ -83,8 +74,9 @@ if etf_data:
     )
 
     fig.update_layout(
-        yaxis=dict(type="log", title="비중 (%)", tickvals=[1, 1.5, 2, 2.5, 3, 4, 5, 7, 10, 15, 20], fixedrange=True),
-        xaxis=dict(type="category", title="날짜", fixedrange=True),
+        # 💡 [핵심 패치] fixedrange=True 자물쇠를 풀었습니다! 이제 마우스로 드래그해서 마음껏 줌인/아웃 하세요!
+        yaxis=dict(type="log", title="비중 (%)", tickvals=[1, 1.5, 2, 2.5, 3, 4, 5, 7, 10, 15, 20]),
+        xaxis=dict(type="category", title="날짜"),
         height=800,
         legend=dict(title="종목명", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02),
         hovermode="closest"
@@ -137,7 +129,6 @@ for etf_name, raw_df in etf_data.items():
     etf_short = etf_name.replace('TIME ', '').replace('TIME', '').replace('KoAct ', '').replace('KoAct', '').strip()
 
     for col in df.columns[1:]: 
-        # 💡 [핵심 패치 3] 글자 데이터('_증감')는 수학 계산을 안 하도록 건너뛰기!
         if str(col).endswith('_증감'):
             continue
 
