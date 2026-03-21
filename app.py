@@ -80,9 +80,21 @@ if etf_data:
         xaxis=dict(type="category", title="날짜"),
         height=800,
         legend=dict(title="종목명", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02),
-        hovermode="closest"
+        hovermode="closest",
+        
+        # =====================================================================
+        # 💡 [가독성 극대화 패치] 마우스 올렸을 때 뜨는 라벨(Hover Label) 블랙&화이트 튜닝
+        # =====================================================================
+        hoverlabel=dict(
+            bgcolor="white",       # 1. 라벨 배경색을 깨끗한 흰색(white)으로!
+            font_size=13,          # 2. 글씨 크기는 보기 좋게 유지
+            font_color="black",    # 3. [핵심] 글씨 색상을 가장 또렷한 검정색(black)으로!
+            font_family="Malgun Gothic, sans-serif", # 4. 한글 폰트 지정 (깨짐 방지)
+            bordercolor="#B0BEC5", # 5. 테두리는 은은하고 세련된 회색으로 장식
+            align="left"           # 6. 글씨 왼쪽 정렬
+        )
+        # =====================================================================
     )
-
     st.plotly_chart(fig, use_container_width=True)
     st.info(f"✅ 총 {len(df[name_col_name].unique())}개 종목이 그래프에 표시되고 있습니다.")
     
