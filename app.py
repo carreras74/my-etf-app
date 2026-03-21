@@ -201,6 +201,8 @@ draw_top20_bar_chart(koact_records, "KoAct", color_koact)
 # =====================================================================
 # 📈 [퀀트 마스터 비서] 내 매입 종목 입체 분석 그래프 (완전 자동화)
 # =====================================================================
+import urllib.parse # 💡 한글 URL 번역기 마법사 출동!
+
 st.markdown("---")
 st.header("🦅 내 매입 종목 입체 분석 대시보드")
 st.markdown("**💡 깃허브의 '매입장부.xlsx'를 실시간으로 읽어와 로봇이 그린 그래프를 띄워줍니다.**")
@@ -210,32 +212,33 @@ github_id = "carreras74" # 대표님 ID
 repo_name = "ETF_Auto_Bot"
 base_url = f"https://raw.githubusercontent.com/{github_id}/{repo_name}/main/"
 
-# 2. [핵심] 앱이 깃허브에 있는 매입장부를 직접 열어서 종목명을 캐냅니다!
-ledger_url = f"{base_url}매입장부.xlsx"
+# 2. [핵심] 한글 파일명을 인터넷이 읽을 수 있게 안전하게 번역!
+safe_ledger_name = urllib.parse.quote("매입장부.xlsx")
+ledger_url = f"{base_url}{safe_ledger_name}"
 
 try:
-    # 인터넷(깃허브)에 있는 엑셀 파일을 판다스로 1초 만에 읽어오기
+    # 번역된 안전한 주소로 엑셀 읽어오기
     ledger_df = pd.read_excel(ledger_url)
     
-    # '종목명' 열에 있는 이름들을 싹 긁어와서 리스트로 만들기 (중복 제거)
     my_stocks = ledger_df['종목명'].dropna().unique().tolist()
     
     if my_stocks:
-        # 장부에 적힌 종목 개수만큼 알아서 탭(Tab)을 만듭니다!
         stock_tabs = st.tabs([f"📈 {name}" for name in my_stocks])
         
         for i, tab in enumerate(stock_tabs):
             stock_name = my_stocks[i]
-            # 그 종목의 그래프 사진 주소
-            image_url = f"{base_url}{stock_name}_분석.png"
+            
+            # 사진 이름("삼성전자_분석.png")도 한글이므로 똑같이 안전하게 번역!
+            safe_image_name = urllib.parse.quote(f"{stock_name}_분석.png")
+            image_url = f"{base_url}{safe_image_name}"
             
             with tab:
                 st.subheader(f"📊 {stock_name} - 주가 vs ETF 비중 추이")
-                # 사진 띄우기
                 st.image(image_url, caption=f"🤖 {stock_name} 입체 분석 그래프 (매일 아침 7시 자동 업데이트)", use_container_width=True)
     else:
         st.info("💡 매입장부에 기록된 종목이 없습니다.")
 
 except Exception as e:
-    # 💡 끝에 {e} 를 추가해서 로봇이 직접 변명(진짜 에러 이유)을 하도록 만듭니다!
     st.warning(f"⚠️ 깃허브에서 '매입장부.xlsx'를 아직 불러오지 못했습니다. 에러 상세 원인: {e}")
+
+st.markdown("<br><br><br>", unsafe_allow_html=True)
