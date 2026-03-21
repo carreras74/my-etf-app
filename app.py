@@ -30,6 +30,12 @@ etf_data = load_data_from_google()
 if etf_data:
     selected_etf = st.sidebar.selectbox("ETF 선택", list(etf_data.keys()))
     
+    # =====================================================================
+    # 💡 [UI/UX 디테일 패치] 사이드바 드롭다운 무조건 '아래로' 열리게 강제하기
+    # 투명한 엔터키(<br>)를 15번 쳐서 아래 공간을 넉넉하게 확보해 줍니다!
+    # =====================================================================
+    st.sidebar.markdown("<br>" * 15, unsafe_allow_html=True)
+    
     # 💡 [핵심] raw_df가 바로 구글 시트 원본 그 자체입니다!
     raw_df = etf_data[selected_etf].copy()
 
