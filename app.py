@@ -99,35 +99,50 @@ if etf_data:
 
     st.subheader(f"📅 {selected_etf} 실시간 비중 변동 추이 (상세 확대 모드)")
 
+    # =====================================================================
+    # 💡 [범프 차트 마법 패치] 떡진 선들을 1등~20등 동일 간격으로 쫙 펴줍니다!
+    # =====================================================================
     fig = px.line(
-        df, x=date_col_name, y=weight_col_name, color=name_col_name, markers=True,
-        hover_name=name_col_name, category_orders={name_col_name: latest_order}, 
-        # 💡 [툴팁 내용 완벽 제어] 순위 끄고, 쪼갠 데이터 켜기!
+        df, 
+        x=date_col_name, 
+        y='순위', # 💡 핵심 1: Y축을 '비중'이 아니라 '순위'로 전격 교체!
+        color=name_col_name, 
+        markers=True,
+        hover_name=name_col_name, 
+        category_orders={name_col_name: latest_order}, 
+        
+        # 💡 툴팁(호버) 내용 정리: Y축이 순위가 되었으니, 비중을 툴팁에서 봅니다!
         hover_data={
-            weight_col_name: True,
-            '순위': False,            # ❌ 순위 제거
-            '수량증감': False,        # ❌ 합쳐져 있던 기존 열 숨기기
-            '수량증감(주식수)': True, # ✅ 셋째 줄
-            '종가/등락률': True,      # ✅ 넷째 줄 (빨강/파랑 색상 적용됨)
+            '순위': False,            # Y축 숫자로 순위가 바로 보이므로 툴팁에선 숨김
+            weight_col_name: True,    # ✅ 둘째 줄: 비중(%)
+            '수량증감': False,        
+            '수량증감(주식수)': True, # ✅ 셋째 줄: 수량
+            '종가/등락률': True,      # ✅ 넷째 줄: 빨강/파랑 주가
             date_col_name: False,
             name_col_name: False
         }
     )
 
     fig.update_layout(
-        yaxis=dict(type="log", title="비중 (%)", tickvals=[1, 1.5, 2, 2.5, 3, 4, 5, 7, 10, 15, 20]),
+        # 💡 핵심 2: Y축 디자인 완벽 개조 (1등이 맨 위로, 1칸씩 동일 간격!)
+        yaxis=dict(
+            title="종목 순위 (등수)", 
+            autorange="reversed", # 1등이 화면 맨 위로 올라오도록 축을 뒤집기!
+            tickmode="linear",    # 1.5등, 2.5등 같은 소수점 없애기
+            dtick=1               # 무조건 1, 2, 3, 4 정수 간격으로 눈금 긋기
+        ),
         xaxis=dict(type="category", title="날짜"),
         height=800,
         legend=dict(title="종목명", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02),
         hovermode="closest",
         
-        # 💡 [화이트 라벨 강제 고정] 깨끗한 흰 바탕 + 또렷한 검은 글씨!
+        # (아까 세팅한 깔끔한 흰색 바탕 + 까만 글씨 유지)
         hoverlabel=dict(
-            bgcolor="white",       # 라벨 배경색 흰색
+            bgcolor="white",       
             font_size=13,
-            font_color="black",    # 기본 글씨 검은색
+            font_color="black",    
             font_family="Malgun Gothic, sans-serif",
-            bordercolor="#B0BEC5", # 은은한 테두리
+            bordercolor="#B0BEC5", 
             align="left"
         )
     )
