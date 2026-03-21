@@ -263,17 +263,18 @@ color_koact = {'5영업일변화(%p)': '#AEC7E8', '3영업일변화(%p)': '#1F77
 draw_top20_bar_chart(koact_records, "KoAct", color_koact)
 
 # =====================================================================
-# 📈 [퀀트 마스터 비서] 내 매입 종목 입체 분석 다이내믹 차트 (HTS 모드)
+# 📈 [퀀트 마스터 비서] 내 매입 종목 입체 분석 다이내믹 차트 (전체 수급 합산 모드)
 # =====================================================================
 import urllib.parse
 import re
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 st.markdown("---")
 st.header("🦅 내 매입 종목 입체 분석 대시보드")
-st.markdown("**💡 앱이 구글 시트를 읽어와 주가, 비중, 수량증감을 HTS급 2층 차트로 그립니다.**")
+st.markdown("**💡 1층: 대장 ETF 비중 및 주가 / 2층: 전체 ETF 합산 총 수량증감**")
 
 github_id = "carreras74" # 대표님 ID
 repo_name = "ETF_Auto_Bot"
@@ -309,7 +310,7 @@ try:
                                 b_price_val = b_price_val.replace(',', '').replace('원', '').strip()
                             buy_price = float(b_price_val)
 
-                # 2. 대장 ETF 찾기
+                # 2. 대장 ETF 찾기 (비중은 이 대장 ETF를 기준으로 표시합니다)
                 best_etf = None
                 max_weight = -1
                 for etf_name, df in etf_data.items():
@@ -322,41 +323,60 @@ try:
                     st.warning(f"'{stock_name}' 종목은 현재 추적 중인 ETF에 존재하지 않습니다.")
                     continue
                     
-                # 3. 데이터 정제
-                target_df = etf_data[best_etf].copy()
-                date_col = target_df.columns[0]
-                diff_col = f"{stock_name}_증감"
+                # =====================================================================
+                # 💡 [핵심 엔진] 모든 ETF를 순회하며 수량 증감을 싹 다 합산(Sum) 합니다!
+                # =====================================================================
+                agg_data = {}
                 
-                plot_data = []
-                for _, row in target_df.iterrows():
-                    d = row[date_col]
-                    w = pd.to_numeric(row[stock_name], errors='coerce')
-                    w = w if pd.notna(w) else 0.0
-                    
-                    diff_str = str(row[diff_col]) if diff_col in target_df.columns else ""
-                    
-                    price = np.nan 
-                    qty_change = 0
-                    q_str = diff_str
-                    
-                    if " | " in diff_str:
-                        parts = diff_str.split(" | ")
-                        q_str = parts[0].strip()
-                        p_str = parts[1].strip()
+                for etf_name, df in etf_data.items():
+                    if stock_name not in df.columns:
+                        continue
                         
-                        match = re.search(r'₩([\d,]+)', p_str)
-                        if match: price = int(match.group(1).replace(',', ''))
-                            
-                    if '🔴▲' in q_str: qty_change = int(q_str.replace('🔴▲', '').replace(',', '').strip())
-                    elif '🔵▼' in q_str: qty_change = -int(q_str.replace('🔵▼', '').replace(',', '').strip())
-                            
-                    plot_data.append({'Date': d, 'Weight': w, 'Price': price, 'QtyChange': qty_change})
+                    date_col = df.columns[0]
+                    diff_col = f"{stock_name}_증감"
                     
+                    for _, row in df.iterrows():
+                        d = str(row[date_col]).strip()
+                        if d not in agg_data:
+                            agg_data[d] = {'Weight': 0.0, 'Price': np.nan, 'TotalQtyChange': 0}
+                            
+                        # 대장 ETF일 경우에만 1층에 띄울 비중(Weight)을 기록합니다
+                        if etf_name == best_etf:
+                            w = pd.to_numeric(row[stock_name], errors='coerce')
+                            agg_data[d]['Weight'] = w if pd.notna(w) else 0.0
+                            
+                        diff_str = str(row[diff_col]) if diff_col in df.columns else ""
+                        qty_change = 0
+                        q_str = diff_str
+                        
+                        if " | " in diff_str:
+                            parts = diff_str.split(" | ")
+                            q_str = parts[0].strip()
+                            p_str = parts[1].strip()
+                            
+                            match = re.search(r'₩([\d,]+)', p_str)
+                            if match: agg_data[d]['Price'] = int(match.group(1).replace(',', ''))
+                                
+                        if '🔴▲' in q_str: qty_change = int(q_str.replace('🔴▲', '').replace(',', '').strip())
+                        elif '🔵▼' in q_str: qty_change = -int(q_str.replace('🔵▼', '').replace(',', '').strip())
+                                
+                        # 👉 모든 ETF의 수량 증감을 하나의 바구니에 계속 더합니다!
+                        agg_data[d]['TotalQtyChange'] += qty_change
+
+                # 딕셔너리를 다시 DataFrame으로 변환 및 날짜순 정렬
+                plot_data = [{'Date': k, 'Weight': v['Weight'], 'Price': v['Price'], 'QtyChange': v['TotalQtyChange']} for k, v in agg_data.items()]
                 p_df = pd.DataFrame(plot_data)
-                p_df['Date'] = pd.to_datetime(p_df['Date']).dt.strftime('%Y-%m-%d')
-                valid_p_df = p_df.dropna(subset=['Price'])
                 
-                st.subheader(f"📊 {stock_name} 입체 분석 (추적: {best_etf})")
+                # 날짜 정렬을 위한 안전장치
+                p_df['DateObj'] = pd.to_datetime(p_df['Date'], errors='coerce')
+                p_df = p_df.dropna(subset=['DateObj']).sort_values('DateObj')
+                p_df['Date'] = p_df['DateObj'].dt.strftime('%Y-%m-%d')
+                p_df = p_df.drop(columns=['DateObj'])
+                
+                valid_p_df = p_df.dropna(subset=['Price'])
+                # =====================================================================
+                
+                st.subheader(f"📊 {stock_name} 입체 분석 (비중: {best_etf} / 수량: 전체 합산)")
                 
                 # 4. HTS급 2층 차트 렌더링
                 fig = make_subplots(
@@ -369,9 +389,9 @@ try:
                 
                 fig.update_xaxes(type='category')
                 
-                # [1층] ETF 비중 막대
+                # [1층] 대장 ETF 비중 막대
                 fig.add_trace(
-                    go.Bar(x=p_df['Date'], y=p_df['Weight'], name='ETF 내 비중(%)', opacity=0.5, marker_color='#AEC7E8', width=0.35),
+                    go.Bar(x=p_df['Date'], y=p_df['Weight'], name=f'{best_etf} 비중(%)', opacity=0.5, marker_color='#AEC7E8', width=0.35),
                     row=1, col=1, secondary_y=False
                 )
                 
@@ -381,18 +401,15 @@ try:
                     row=1, col=1, secondary_y=True
                 )
                 
-                # [2층] 수량증감 막대 (상승=빨강, 하락=파랑)
+                # [2층] 전체 ETF 합산 수량증감 막대 (상승=빨강, 하락=파랑)
                 colors = ['#FF4B4B' if q > 0 else '#1F77B4' if q < 0 else '#CCCCCC' for q in p_df['QtyChange']]
                 fig.add_trace(
-                    go.Bar(x=p_df['Date'], y=p_df['QtyChange'], name='ETF 수량증감', marker_color=colors, width=0.35),
+                    go.Bar(x=p_df['Date'], y=p_df['QtyChange'], name='전체 ETF 수량 합산', marker_color=colors, width=0.35),
                     row=2, col=1
                 )
                 
-                # =====================================================================
-                # 💡 [핵심 버그 치료] Plotly의 함수 버그를 우회하여 직접 십자선을 그립니다!
-                # =====================================================================
+                # [십자선 마법] 내 매수단가 및 일자 표시
                 if not p_df.empty:
-                    # 매수단가 가로선 그리기
                     if buy_price is not None:
                         fig.add_trace(
                             go.Scatter(
@@ -409,7 +426,6 @@ try:
                             row=1, col=1, secondary_y=True
                         )
                     
-                    # 매수일자 세로선 그리기
                     if buy_date is not None and buy_date in p_df['Date'].values:
                         max_y = valid_p_df['Price'].max() if not valid_p_df.empty else 100000
                         min_y = valid_p_df['Price'].min() if not valid_p_df.empty else 0
@@ -429,7 +445,6 @@ try:
                             ),
                             row=1, col=1, secondary_y=True
                         )
-                # =====================================================================
 
                 fig.update_layout(
                     height=700,
@@ -442,7 +457,7 @@ try:
                 fig.update_xaxes(showgrid=False)
                 fig.update_yaxes(title_text="비중 (%)", secondary_y=False, row=1, col=1, showgrid=False, zeroline=False)
                 fig.update_yaxes(title_text="주가 (원)", secondary_y=True, row=1, col=1, showgrid=True, gridcolor='#F0F0F0', zeroline=False)
-                fig.update_yaxes(title_text="수량증감", row=2, col=1, showgrid=True, gridcolor='#F0F0F0', zeroline=True, zerolinecolor='#E0E0E0')
+                fig.update_yaxes(title_text="총 수량증감 (합산)", row=2, col=1, showgrid=True, gridcolor='#F0F0F0', zeroline=True, zerolinecolor='#E0E0E0')
                 
                 st.plotly_chart(fig, use_container_width=True)
 
