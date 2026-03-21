@@ -106,7 +106,7 @@ if etf_data:
             '순위': False,            
             weight_col_name: True,    
             '수량증감': False,        
-            '수량증감(주식수)탭': True, 
+            '수량증감(주식수)': True,  # 💡 [여기!] 아까 잘못 들어갔던 '탭' 글자를 뺐습니다!
             '종가/등락률': True,      
             date_col_name: False,
             name_col_name: False
