@@ -354,6 +354,7 @@ try:
                     
                 p_df = pd.DataFrame(plot_data)
                 p_df['Date'] = pd.to_datetime(p_df['Date']).dt.strftime('%Y-%m-%d')
+                valid_p_df = p_df.dropna(subset=['Price'])
                 
                 st.subheader(f"📊 {stock_name} 입체 분석 (추적: {best_etf})")
                 
@@ -374,18 +375,11 @@ try:
                     row=1, col=1, secondary_y=False
                 )
                 
-                # =====================================================================
-                # 💡 [핵심 에러 치료] 빈칸(NaN) 날짜를 아예 빼버리고 선을 그립니다!
-                # (connectgaps 옵션도 삭제하여 글자+숫자 충돌을 원천 차단했습니다)
-                # =====================================================================
-                valid_p_df = p_df.dropna(subset=['Price'])
-                
                 # [1층] 주가 꺾은선 
                 fig.add_trace(
                     go.Scatter(x=valid_p_df['Date'], y=valid_p_df['Price'], name='주가(원)', mode='lines+markers', line=dict(color='#333333', width=3), marker=dict(size=6)),
                     row=1, col=1, secondary_y=True
                 )
-                # =====================================================================
                 
                 # [2층] 수량증감 막대 (상승=빨강, 하락=파랑)
                 colors = ['#FF4B4B' if q > 0 else '#1F77B4' if q < 0 else '#CCCCCC' for q in p_df['QtyChange']]
@@ -394,15 +388,48 @@ try:
                     row=2, col=1
                 )
                 
-                # [십자선 마법] 내 매수단가 및 일자 표시
-                if buy_price is not None:
-                    fig.add_hline(y=buy_price, line_dash="dash", line_color="#00C853", line_width=2, 
-                                  annotation_text=f"내 매수단가 ({buy_price:,.0f}원)", annotation_position="top left", 
-                                  row=1, col=1, secondary_y=True)
-                if buy_date is not None and buy_date in p_df['Date'].values:
-                    fig.add_vline(x=buy_date, line_dash="dash", line_color="#00C853", line_width=2, 
-                                  annotation_text="매수타점", annotation_position="top right", 
-                                  row=1, col=1)
+                # =====================================================================
+                # 💡 [핵심 버그 치료] Plotly의 함수 버그를 우회하여 직접 십자선을 그립니다!
+                # =====================================================================
+                if not p_df.empty:
+                    # 매수단가 가로선 그리기
+                    if buy_price is not None:
+                        fig.add_trace(
+                            go.Scatter(
+                                x=[p_df['Date'].iloc[0], p_df['Date'].iloc[-1]], 
+                                y=[buy_price, buy_price], 
+                                mode="lines+text", 
+                                line=dict(color="#00C853", dash="dash", width=2),
+                                name=f"매수단가 ({buy_price:,.0f}원)",
+                                text=[f"내 매수단가 ({buy_price:,.0f}원)", ""],
+                                textposition="bottom right",
+                                showlegend=False,
+                                hoverinfo="skip"
+                            ),
+                            row=1, col=1, secondary_y=True
+                        )
+                    
+                    # 매수일자 세로선 그리기
+                    if buy_date is not None and buy_date in p_df['Date'].values:
+                        max_y = valid_p_df['Price'].max() if not valid_p_df.empty else 100000
+                        min_y = valid_p_df['Price'].min() if not valid_p_df.empty else 0
+                        margin = (max_y - min_y) * 0.1 if max_y != min_y else max_y * 0.1
+                        
+                        fig.add_trace(
+                            go.Scatter(
+                                x=[buy_date, buy_date], 
+                                y=[min_y - margin, max_y + margin], 
+                                mode="lines+text", 
+                                line=dict(color="#00C853", dash="dash", width=2),
+                                name="매수타점",
+                                text=["매수타점", ""],
+                                textposition="top right",
+                                showlegend=False,
+                                hoverinfo="skip"
+                            ),
+                            row=1, col=1, secondary_y=True
+                        )
+                # =====================================================================
 
                 fig.update_layout(
                     height=700,
