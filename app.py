@@ -237,6 +237,5 @@ try:
         st.info("💡 매입장부에 기록된 종목이 없습니다.")
 
 except Exception as e:
-    st.warning("⚠️ 깃허브에서 '매입장부.xlsx'를 아직 불러오지 못했습니다. 깃허브 업로드 상태를 확인해주세요!")
-
-st.markdown("<br><br><br>", unsafe_allow_html=True)
+    # 💡 끝에 {e} 를 추가해서 로봇이 직접 변명(진짜 에러 이유)을 하도록 만듭니다!
+    st.warning(f"⚠️ 깃허브에서 '매입장부.xlsx'를 아직 불러오지 못했습니다. 에러 상세 원인: {e}")
