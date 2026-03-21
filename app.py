@@ -69,19 +69,20 @@ if etf_data:
     weight_col_name = '비중'
     
     # 순위 계산 (그래프 내부 계산용으로만 남겨둡니다)
-    df['순위'] = df.groupby(date_col_name)[weight_col_name].rank(method='min', ascending=False)
+    # =====================================================================
+    # 💡 [핵심 패치 1] 등수 세분화 및 겹침 방지 트릭
+    # 동점일 때 'min'(공동등수) 대신 'first'(먼저 나온 놈이 위)를 써서
+    # 모든 종목에 0.000...1 단위로라도 겹치지 않는 고유 순위를 부여합니다!
+    # =====================================================================
+    df['순위'] = df.groupby(date_col_name)[weight_col_name].rank(method='first', ascending=False)
 
-    # =====================================================================
-    # 💡 [툴팁 분리 및 마법 색상 패치] 수량과 주가를 쪼개고 색상을 입힙니다!
-    # =====================================================================
+    # 툴팁에 보여줄 데이터 준비 (아까 세팅 유지)
     def split_qty(val):
         return str(val).split(' | ')[0] if ' | ' in str(val) else str(val)
 
     def format_price(val):
         if ' | ' not in str(val): return "-"
         price_str = str(val).split(' | ')[1]
-        
-        # 상승(+)은 빨강, 하락(-)은 파랑 HTML 태그 적용!
         if '(+' in price_str:
             return f"<span style='color:red'><b>{price_str}</b></span>"
         elif '(-' in price_str:
@@ -89,54 +90,53 @@ if etf_data:
         else:
             return price_str
 
-    # 툴팁에 예쁘게 보여줄 이름으로 새로운 열 2개 생성
     df['수량증감(주식수)'] = df['수량증감'].apply(split_qty)
     df['종가/등락률'] = df['수량증감'].apply(format_price)
-    # =====================================================================
 
     latest_date_val = df[date_col_name].max()
     latest_order = df[df[date_col_name] == latest_date_val].sort_values(by=weight_col_name, ascending=False)[name_col_name].tolist()
 
     st.subheader(f"📅 {selected_etf} 실시간 비중 변동 추이 (상세 확대 모드)")
 
-    # =====================================================================
-    # 💡 [범프 차트 마법 패치] 떡진 선들을 1등~20등 동일 간격으로 쫙 펴줍니다!
-    # =====================================================================
+    # (차트 그리는 부분은 동일 유지)
     fig = px.line(
-        df, 
-        x=date_col_name, 
-        y='순위', # 💡 핵심 1: Y축을 '비중'이 아니라 '순위'로 전격 교체!
-        color=name_col_name, 
-        markers=True,
-        hover_name=name_col_name, 
-        category_orders={name_col_name: latest_order}, 
-        
-        # 💡 툴팁(호버) 내용 정리: Y축이 순위가 되었으니, 비중을 툴팁에서 봅니다!
+        df, x=date_col_name, y='순위', color=name_col_name, markers=True,
+        hover_name=name_col_name, category_orders={name_col_name: latest_order}, 
         hover_data={
-            '순위': False,            # Y축 숫자로 순위가 바로 보이므로 툴팁에선 숨김
-            weight_col_name: True,    # ✅ 둘째 줄: 비중(%)
+            '순위': False,            
+            weight_col_name: True,    
             '수량증감': False,        
-            '수량증감(주식수)': True, # ✅ 셋째 줄: 수량
-            '종가/등락률': True,      # ✅ 넷째 줄: 빨강/파랑 주가
+            '수량증감(주식수)탭': True, 
+            '종가/등락률': True,      
             date_col_name: False,
             name_col_name: False
         }
     )
 
     fig.update_layout(
-        # 💡 핵심 2: Y축 디자인 완벽 개조 (1등이 맨 위로, 1칸씩 동일 간격!)
+        # 💡 핵심 2: Y축 디자인 완벽 개조 (그리드 선 제거!)
         yaxis=dict(
             title="종목 순위 (등수)", 
-            autorange="reversed", # 1등이 화면 맨 위로 올라오도록 축을 뒤집기!
-            tickmode="linear",    # 1.5등, 2.5등 같은 소수점 없애기
-            dtick=1               # 무조건 1, 2, 3, 4 정수 간격으로 눈금 긋기
+            autorange="reversed", # 1등이 맨 위로
+            tickmode="linear",    # 소수점 없애기 (1, 2, 3...)
+            dtick=1,               # 1 단위로 간격 설정
+            
+            # 💡 [가독성 패치] 흐릿한 베이스 선(그리드)을 싹 지워버립니다!
+            showgrid=False,       # Y축 수평선 숨기기
+            zeroline=False,       # 제로 라인 숨기기
+            showticklabels=True   # ❌ Y축 숫자(등수)는 유지!
         ),
-        xaxis=dict(type="category", title="날짜"),
+        xaxis=dict(
+            type="category", 
+            title="날짜",
+            # (보너스: X축 세로선도 지우면 더 깔끔합니다!)
+            showgrid=False        # X축 수직선 숨기기
+        ),
         height=800,
         legend=dict(title="종목명", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02),
         hovermode="closest",
         
-        # (아까 세팅한 깔끔한 흰색 바탕 + 까만 글씨 유지)
+        # (깔끔한 화이트 라벨 유지)
         hoverlabel=dict(
             bgcolor="white",       
             font_size=13,
