@@ -3,3 +3,4 @@ gspread
 pandas
 plotly
 gspread-dataframe
+openpyxl
