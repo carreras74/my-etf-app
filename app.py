@@ -294,7 +294,7 @@ try:
             stock_name = my_stocks[i]
             
             with tab:
-                # 1. 내 매수 타점 정보 가져오기 (문자/숫자 에러 완벽 방어)
+                # 1. 내 매수 타점 정보 가져오기
                 buy_date, buy_price = None, None
                 if has_buy_info:
                     row_data = ledger_df[ledger_df['종목명'] == stock_name]
@@ -322,7 +322,7 @@ try:
                     st.warning(f"'{stock_name}' 종목은 현재 추적 중인 ETF에 존재하지 않습니다.")
                     continue
                     
-                # 3. 데이터 정제 (수량, 주가 추출 로직 강화)
+                # 3. 데이터 정제
                 target_df = etf_data[best_etf].copy()
                 date_col = target_df.columns[0]
                 diff_col = f"{stock_name}_증감"
@@ -335,7 +335,7 @@ try:
                     
                     diff_str = str(row[diff_col]) if diff_col in target_df.columns else ""
                     
-                    price = np.nan # None 대신 수학 연산이 가능한 nan 사용!
+                    price = np.nan 
                     qty_change = 0
                     q_str = diff_str
                     
@@ -366,7 +366,6 @@ try:
                     specs=[[{"secondary_y": True}], [{"secondary_y": False}]]
                 )
                 
-                # 💡 [핵심 치료제] 그림을 그리기 전에 "X축은 절대 계산하지 말고 글자로만 봐라!" 라고 강력 명령
                 fig.update_xaxes(type='category')
                 
                 # [1층] ETF 비중 막대
@@ -375,11 +374,18 @@ try:
                     row=1, col=1, secondary_y=False
                 )
                 
-                # [1층] 주가 꺾은선
+                # =====================================================================
+                # 💡 [핵심 에러 치료] 빈칸(NaN) 날짜를 아예 빼버리고 선을 그립니다!
+                # (connectgaps 옵션도 삭제하여 글자+숫자 충돌을 원천 차단했습니다)
+                # =====================================================================
+                valid_p_df = p_df.dropna(subset=['Price'])
+                
+                # [1층] 주가 꺾은선 
                 fig.add_trace(
-                    go.Scatter(x=p_df['Date'], y=p_df['Price'], name='주가(원)', mode='lines+markers', line=dict(color='#333333', width=3), marker=dict(size=6), connectgaps=True),
+                    go.Scatter(x=valid_p_df['Date'], y=valid_p_df['Price'], name='주가(원)', mode='lines+markers', line=dict(color='#333333', width=3), marker=dict(size=6)),
                     row=1, col=1, secondary_y=True
                 )
+                # =====================================================================
                 
                 # [2층] 수량증감 막대 (상승=빨강, 하락=파랑)
                 colors = ['#FF4B4B' if q > 0 else '#1F77B4' if q < 0 else '#CCCCCC' for q in p_df['QtyChange']]
@@ -406,7 +412,6 @@ try:
                     margin=dict(l=10, r=10, t=50, b=10)
                 )
                 
-                # 축 설정 (주말 빈칸 삭제 및 그리드 디자인)
                 fig.update_xaxes(showgrid=False)
                 fig.update_yaxes(title_text="비중 (%)", secondary_y=False, row=1, col=1, showgrid=False, zeroline=False)
                 fig.update_yaxes(title_text="주가 (원)", secondary_y=True, row=1, col=1, showgrid=True, gridcolor='#F0F0F0', zeroline=False)
