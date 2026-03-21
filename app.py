@@ -62,7 +62,31 @@ if etf_data:
     name_col_name = '종목명'
     weight_col_name = '비중'
     
+    # 순위 계산 (그래프 내부 계산용으로만 남겨둡니다)
     df['순위'] = df.groupby(date_col_name)[weight_col_name].rank(method='min', ascending=False)
+
+    # =====================================================================
+    # 💡 [툴팁 분리 및 마법 색상 패치] 수량과 주가를 쪼개고 색상을 입힙니다!
+    # =====================================================================
+    def split_qty(val):
+        return str(val).split(' | ')[0] if ' | ' in str(val) else str(val)
+
+    def format_price(val):
+        if ' | ' not in str(val): return "-"
+        price_str = str(val).split(' | ')[1]
+        
+        # 상승(+)은 빨강, 하락(-)은 파랑 HTML 태그 적용!
+        if '(+' in price_str:
+            return f"<span style='color:red'><b>{price_str}</b></span>"
+        elif '(-' in price_str:
+            return f"<span style='color:blue'><b>{price_str}</b></span>"
+        else:
+            return price_str
+
+    # 툴팁에 예쁘게 보여줄 이름으로 새로운 열 2개 생성
+    df['수량증감(주식수)'] = df['수량증감'].apply(split_qty)
+    df['종가/등락률'] = df['수량증감'].apply(format_price)
+    # =====================================================================
 
     latest_date_val = df[date_col_name].max()
     latest_order = df[df[date_col_name] == latest_date_val].sort_values(by=weight_col_name, ascending=False)[name_col_name].tolist()
@@ -72,7 +96,16 @@ if etf_data:
     fig = px.line(
         df, x=date_col_name, y=weight_col_name, color=name_col_name, markers=True,
         hover_name=name_col_name, category_orders={name_col_name: latest_order}, 
-        hover_data={weight_col_name: True, '순위': True, '수량증감': True, date_col_name: False, name_col_name: False}
+        # 💡 [툴팁 내용 완벽 제어] 순위 끄고, 쪼갠 데이터 켜기!
+        hover_data={
+            weight_col_name: True,
+            '순위': False,            # ❌ 순위 제거
+            '수량증감': False,        # ❌ 합쳐져 있던 기존 열 숨기기
+            '수량증감(주식수)': True, # ✅ 셋째 줄
+            '종가/등락률': True,      # ✅ 넷째 줄 (빨강/파랑 색상 적용됨)
+            date_col_name: False,
+            name_col_name: False
+        }
     )
 
     fig.update_layout(
@@ -82,19 +115,17 @@ if etf_data:
         legend=dict(title="종목명", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02),
         hovermode="closest",
         
-        # =====================================================================
-        # 💡 [가독성 극대화 패치] 마우스 올렸을 때 뜨는 라벨(Hover Label) 블랙&화이트 튜닝
-        # =====================================================================
+        # 💡 [화이트 라벨 강제 고정] 깨끗한 흰 바탕 + 또렷한 검은 글씨!
         hoverlabel=dict(
-            bgcolor="white",       # 1. 라벨 배경색을 깨끗한 흰색(white)으로!
-            font_size=13,          # 2. 글씨 크기는 보기 좋게 유지
-            font_color="black",    # 3. [핵심] 글씨 색상을 가장 또렷한 검정색(black)으로!
-            font_family="Malgun Gothic, sans-serif", # 4. 한글 폰트 지정 (깨짐 방지)
-            bordercolor="#B0BEC5", # 5. 테두리는 은은하고 세련된 회색으로 장식
-            align="left"           # 6. 글씨 왼쪽 정렬
+            bgcolor="white",       # 라벨 배경색 흰색
+            font_size=13,
+            font_color="black",    # 기본 글씨 검은색
+            font_family="Malgun Gothic, sans-serif",
+            bordercolor="#B0BEC5", # 은은한 테두리
+            align="left"
         )
-        # =====================================================================
     )
+
     st.plotly_chart(fig, use_container_width=True)
     st.info(f"✅ 총 {len(df[name_col_name].unique())}개 종목이 그래프에 표시되고 있습니다.")
     
