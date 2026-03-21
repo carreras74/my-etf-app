@@ -267,6 +267,7 @@ draw_top20_bar_chart(koact_records, "KoAct", color_koact)
 # =====================================================================
 import urllib.parse
 import re
+import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -284,7 +285,6 @@ try:
     ledger_df = pd.read_excel(ledger_url)
     my_stocks = ledger_df['종목명'].dropna().unique().tolist()
     
-    # 장부에 매수일자, 매수단가 열이 있는지 확인
     has_buy_info = '매수일자' in ledger_df.columns and '매수단가' in ledger_df.columns
     
     if my_stocks and etf_data:
@@ -294,16 +294,19 @@ try:
             stock_name = my_stocks[i]
             
             with tab:
-                # 1. 내 매수 타점 정보 가져오기
+                # 1. 내 매수 타점 정보 가져오기 (문자/숫자 에러 완벽 방어)
                 buy_date, buy_price = None, None
                 if has_buy_info:
                     row_data = ledger_df[ledger_df['종목명'] == stock_name]
                     if not row_data.empty:
                         b_date_val = row_data.iloc[0].get('매수일자')
                         b_price_val = row_data.iloc[0].get('매수단가')
+                        
                         if pd.notna(b_date_val):
                             buy_date = pd.to_datetime(b_date_val).strftime('%Y-%m-%d')
                         if pd.notna(b_price_val):
+                            if isinstance(b_price_val, str):
+                                b_price_val = b_price_val.replace(',', '').replace('원', '').strip()
                             buy_price = float(b_price_val)
 
                 # 2. 대장 ETF 찾기
@@ -319,7 +322,7 @@ try:
                     st.warning(f"'{stock_name}' 종목은 현재 추적 중인 ETF에 존재하지 않습니다.")
                     continue
                     
-                # 3. 데이터 정제
+                # 3. 데이터 정제 (수량, 주가 추출 로직 강화)
                 target_df = etf_data[best_etf].copy()
                 date_col = target_df.columns[0]
                 diff_col = f"{stock_name}_증감"
@@ -332,8 +335,10 @@ try:
                     
                     diff_str = str(row[diff_col]) if diff_col in target_df.columns else ""
                     
-                    price = None
+                    price = np.nan # None 대신 수학 연산이 가능한 nan 사용!
                     qty_change = 0
+                    q_str = diff_str
+                    
                     if " | " in diff_str:
                         parts = diff_str.split(" | ")
                         q_str = parts[0].strip()
@@ -342,8 +347,8 @@ try:
                         match = re.search(r'₩([\d,]+)', p_str)
                         if match: price = int(match.group(1).replace(',', ''))
                             
-                        if '🔴▲' in q_str: qty_change = int(q_str.replace('🔴▲', '').replace(',', '').strip())
-                        elif '🔵▼' in q_str: qty_change = -int(q_str.replace('🔵▼', '').replace(',', '').strip())
+                    if '🔴▲' in q_str: qty_change = int(q_str.replace('🔴▲', '').replace(',', '').strip())
+                    elif '🔵▼' in q_str: qty_change = -int(q_str.replace('🔵▼', '').replace(',', '').strip())
                             
                     plot_data.append({'Date': d, 'Weight': w, 'Price': price, 'QtyChange': qty_change})
                     
@@ -355,13 +360,16 @@ try:
                 # 4. HTS급 2층 차트 렌더링
                 fig = make_subplots(
                     rows=2, cols=1, 
-                    shared_xaxes=True,           # 1층, 2층 X축(날짜) 동기화!
-                    vertical_spacing=0.08,       # 1층과 2층 사이 간격
-                    row_heights=[0.7, 0.3],      # 1층(주가/비중) 70%, 2층(수량) 30%
+                    shared_xaxes=True,
+                    vertical_spacing=0.08,
+                    row_heights=[0.7, 0.3],
                     specs=[[{"secondary_y": True}], [{"secondary_y": False}]]
                 )
                 
-                # [1층] ETF 비중 막대 (얇게)
+                # 💡 [핵심 치료제] 그림을 그리기 전에 "X축은 절대 계산하지 말고 글자로만 봐라!" 라고 강력 명령
+                fig.update_xaxes(type='category')
+                
+                # [1층] ETF 비중 막대
                 fig.add_trace(
                     go.Bar(x=p_df['Date'], y=p_df['Weight'], name='ETF 내 비중(%)', opacity=0.5, marker_color='#AEC7E8', width=0.35),
                     row=1, col=1, secondary_y=False
@@ -380,7 +388,7 @@ try:
                     row=2, col=1
                 )
                 
-                # [십자선 마법] 내 매수단가 및 일자 표시 (초록색 점선)
+                # [십자선 마법] 내 매수단가 및 일자 표시
                 if buy_price is not None:
                     fig.add_hline(y=buy_price, line_dash="dash", line_color="#00C853", line_width=2, 
                                   annotation_text=f"내 매수단가 ({buy_price:,.0f}원)", annotation_position="top left", 
@@ -399,7 +407,7 @@ try:
                 )
                 
                 # 축 설정 (주말 빈칸 삭제 및 그리드 디자인)
-                fig.update_xaxes(type='category', showgrid=False)
+                fig.update_xaxes(showgrid=False)
                 fig.update_yaxes(title_text="비중 (%)", secondary_y=False, row=1, col=1, showgrid=False, zeroline=False)
                 fig.update_yaxes(title_text="주가 (원)", secondary_y=True, row=1, col=1, showgrid=True, gridcolor='#F0F0F0', zeroline=False)
                 fig.update_yaxes(title_text="수량증감", row=2, col=1, showgrid=True, gridcolor='#F0F0F0', zeroline=True, zerolinecolor='#E0E0E0')
