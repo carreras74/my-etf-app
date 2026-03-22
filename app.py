@@ -16,7 +16,7 @@ st.set_page_config(page_title="ETF 전종목 비중 추적", layout="wide")
 # 🪄 [마법의 함수] HTS 다크모드 입체 분석 차트 자동 생성기
 # (Top 20 주도주 메뉴와 내 매입장부 메뉴에서 모두 가져다 씁니다!)
 # =====================================================================
-def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None):
+def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None, unique_key=None):
     # 1. 대장 ETF 찾기
     best_etf = None
     max_weight = -1
@@ -122,7 +122,11 @@ def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None):
     fig.update_yaxes(title_text="주가 (원)", secondary_y=True, row=1, col=1, showgrid=True, gridcolor='#2B3040', zeroline=False)
     fig.update_yaxes(title_text="총 수량증감", row=2, col=1, showgrid=True, gridcolor='#2B3040', zeroline=True, zerolinecolor='#404658')
     
-    st.plotly_chart(fig, use_container_width=True)
+    # 💡 [핵심 에러 치료] 고유 이름표(key)를 달아서 그립니다!
+    if unique_key is None:
+        unique_key = f"chart_{stock_name}"
+        
+    st.plotly_chart(fig, use_container_width=True, key=unique_key)
 
 
 # =====================================================================
@@ -341,7 +345,8 @@ if time_top20_stocks:
         time_tabs = st.tabs([f"📈 {name}" for name in time_top20_stocks])
         for idx, tab in enumerate(time_tabs):
             with tab:
-                draw_hts_chart(time_top20_stocks[idx], etf_data)
+                # 💡 이름표 완벽 적용!
+                draw_hts_chart(time_top20_stocks[idx], etf_data, unique_key=f"time_{time_top20_stocks[idx]}_{idx}")
 
 st.markdown("<br><br>", unsafe_allow_html=True)
 
@@ -354,7 +359,8 @@ if koact_top20_stocks:
         koact_tabs = st.tabs([f"📈 {name}" for name in koact_top20_stocks])
         for idx, tab in enumerate(koact_tabs):
             with tab:
-                draw_hts_chart(koact_top20_stocks[idx], etf_data)
+                # 💡 이름표 완벽 적용!
+                draw_hts_chart(koact_top20_stocks[idx], etf_data, unique_key=f"koact_{koact_top20_stocks[idx]}_{idx}")
 
 
 # =====================================================================
@@ -397,8 +403,8 @@ try:
                                 b_price_val = b_price_val.replace(',', '').replace('원', '').strip()
                             buy_price = float(b_price_val)
 
-                # 💡 내 매입 장부에도 마법의 HTS 차트 함수를 그대로 적용! (코드 100줄 단축!)
-                draw_hts_chart(stock_name, etf_data, buy_price, buy_date)
+                # 💡 내 매입 장부에도 마법의 HTS 차트 함수를 그대로 적용! (고유 이름표 추가)
+                draw_hts_chart(stock_name, etf_data, buy_price, buy_date, unique_key=f"my_stock_{stock_name}_{i}")
 
 except Exception as e:
     st.warning(f"⚠️ 매입장부 데이터를 불러오는 중 에러가 발생했습니다: {e}")
