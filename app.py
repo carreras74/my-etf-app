@@ -230,8 +230,9 @@ for etf_name, raw_df in etf_data.items():
         diff_col = f"{stock}_증감"
         if diff_col not in df.columns: continue
         
+        # 💡 [핵심 패치 1] 어느 ETF에서 매수 대금이 가장 많이 들어왔는지 추적하기 위한 방(etf_5d)을 만듭니다!
         if stock not in cat_agg:
-            cat_agg[stock] = {'1d': 0.0, '3d': 0.0, '5d': 0.0}
+            cat_agg[stock] = {'1d': 0.0, '3d': 0.0, '5d': 0.0, 'etf_5d': {}}
             
         def calc_net_buy(sub_df):
             net_buy = 0.0
@@ -253,18 +254,32 @@ for etf_name, raw_df in etf_data.items():
                     net_buy += (qty * price)
             return net_buy
             
-        cat_agg[stock]['1d'] += calc_net_buy(last_1_df)
-        cat_agg[stock]['3d'] += calc_net_buy(last_3_df)
-        cat_agg[stock]['5d'] += calc_net_buy(last_5_df)
+        val_1d = calc_net_buy(last_1_df)
+        val_3d = calc_net_buy(last_3_df)
+        val_5d = calc_net_buy(last_5_df)
+        
+        cat_agg[stock]['1d'] += val_1d
+        cat_agg[stock]['3d'] += val_3d
+        cat_agg[stock]['5d'] += val_5d
+        
+        # 💡 [핵심 패치 2] 해당 ETF의 5일 누적 순매수 대금을 꼬리표로 저장해 둡니다.
+        if etf_name not in cat_agg[stock]['etf_5d']:
+            cat_agg[stock]['etf_5d'][etf_name] = 0.0
+        cat_agg[stock]['etf_5d'][etf_name] += val_5d
 
 global_latest_date = max(all_dates) if all_dates else "알수없음"
 
-# 백만원 단위로 쪼개기 (금액이 너무 크면 그래프가 안 예쁩니다)
 time_records = []
 for stock, flows in time_agg.items():
-    if flows['5d'] > 0: # 5일 누적 돈이 들어온(플러스) 종목만
+    if flows['5d'] > 0: # 5일 누적 현금이 들어온 종목만
+        # 💡 [핵심 패치 3] 이 종목에 가장 돈을 많이 쓴 '1등 공신 대장 ETF'를 찾습니다!
+        best_etf = max(flows['etf_5d'], key=flows['etf_5d'].get)
+        etf_short = best_etf.replace('TIME ', '').replace('TIME', '').replace('KoAct ', '').replace('KoAct', '').strip()
+        
         time_records.append({
-            '기준일자': global_latest_date, '표시명': stock,
+            '기준일자': global_latest_date, 
+            '종목명': stock, # 진짜 종목명 (탭 제목용)
+            '표시명': f"{stock}<br>({etf_short})", # X축 표시용 (종목명 + 대장 ETF)
             '당일순매수(백만)': round(flows['1d'] / 1000000, 1),
             '3영업일순매수(백만)': round(flows['3d'] / 1000000, 1),
             '5영업일순매수(백만)': round(flows['5d'] / 1000000, 1)
@@ -273,8 +288,13 @@ for stock, flows in time_agg.items():
 koact_records = []
 for stock, flows in koact_agg.items():
     if flows['5d'] > 0:
+        best_etf = max(flows['etf_5d'], key=flows['etf_5d'].get)
+        etf_short = best_etf.replace('TIME ', '').replace('TIME', '').replace('KoAct ', '').replace('KoAct', '').strip()
+        
         koact_records.append({
-            '기준일자': global_latest_date, '표시명': stock,
+            '기준일자': global_latest_date, 
+            '종목명': stock,
+            '표시명': f"{stock}<br>({etf_short})",
             '당일순매수(백만)': round(flows['1d'] / 1000000, 1),
             '3영업일순매수(백만)': round(flows['3d'] / 1000000, 1),
             '5영업일순매수(백만)': round(flows['5d'] / 1000000, 1)
@@ -286,7 +306,6 @@ def draw_top20_money_chart(records, category_name, color_map):
         return []
     
     df_res = pd.DataFrame(records)
-    # 5일 누적 순매수 대금(현금) 기준으로 1등부터 20등까지 줄세우기!
     df_res = df_res.sort_values(by='5영업일순매수(백만)', ascending=False).head(20)
     date_str = df_res['기준일자'].iloc[0]
     
@@ -308,7 +327,9 @@ def draw_top20_money_chart(records, category_name, color_map):
     fig.update_yaxes(zeroline=True, zerolinewidth=2, zerolinecolor='black')
     fig.update_traces(textposition='outside', textangle=-90, textfont_size=10)
     st.plotly_chart(fig, use_container_width=True)
-    return df_res['표시명'].tolist()
+    
+    # 💡 탭(Tab) 제목과 다크모드 차트로 넘길 때는 깔끔한 '진짜 종목명'만 리스트로 반환!
+    return df_res['종목명'].tolist()
 
 # [TIME] 찐 주도주 렌더링
 color_time = {'5영업일순매수(백만)': '#FFBB78', '3영업일순매수(백만)': '#FF7F0E', '당일순매수(백만)': '#D62728'}
