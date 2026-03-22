@@ -395,9 +395,9 @@ try:
                     row=1, col=1, secondary_y=False
                 )
                 
-                # [1층] 주가 꺾은선 
+                # 💡 [색상 패치] 어두운 배경에 맞춰 주가 꺾은선을 눈부신 '골드(노란색)'로 변경!
                 fig.add_trace(
-                    go.Scatter(x=valid_p_df['Date'], y=valid_p_df['Price'], name='주가(원)', mode='lines+markers', line=dict(color='#333333', width=3), marker=dict(size=6)),
+                    go.Scatter(x=valid_p_df['Date'], y=valid_p_df['Price'], name='주가(원)', mode='lines+markers', line=dict(color='#FFD700', width=3), marker=dict(size=6)),
                     row=1, col=1, secondary_y=True
                 )
                 
@@ -420,6 +420,7 @@ try:
                                 name=f"매수단가 ({buy_price:,.0f}원)",
                                 text=[f"내 매수단가 ({buy_price:,.0f}원)", ""],
                                 textposition="bottom right",
+                                textfont=dict(color='white'), # 글자색 흰색으로 명확하게!
                                 showlegend=False,
                                 hoverinfo="skip"
                             ),
@@ -440,24 +441,31 @@ try:
                                 name="매수타점",
                                 text=["매수타점", ""],
                                 textposition="top right",
+                                textfont=dict(color='white'), # 글자색 흰색으로 명확하게!
                                 showlegend=False,
                                 hoverinfo="skip"
                             ),
                             row=1, col=1, secondary_y=True
                         )
 
+                # =====================================================================
+                # 💡 [다크 테마 마법] 배경은 진한 남회색, 모든 글자는 흰색, 그리드는 은은하게!
+                # =====================================================================
                 fig.update_layout(
                     height=700,
                     hovermode="x unified",
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    plot_bgcolor='white', paper_bgcolor='white',
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='white')),
+                    plot_bgcolor='#131722',   # 여의도 프로들이 쓰는 진한 남회색 배경
+                    paper_bgcolor='#131722',
+                    font=dict(color='white'), # X축, Y축 숫자와 글자를 모두 깨끗한 흰색으로!
                     margin=dict(l=10, r=10, t=50, b=10)
                 )
                 
                 fig.update_xaxes(showgrid=False)
                 fig.update_yaxes(title_text="비중 (%)", secondary_y=False, row=1, col=1, showgrid=False, zeroline=False)
-                fig.update_yaxes(title_text="주가 (원)", secondary_y=True, row=1, col=1, showgrid=True, gridcolor='#F0F0F0', zeroline=False)
-                fig.update_yaxes(title_text="총 수량증감 (합산)", row=2, col=1, showgrid=True, gridcolor='#F0F0F0', zeroline=True, zerolinecolor='#E0E0E0')
+                fig.update_yaxes(title_text="주가 (원)", secondary_y=True, row=1, col=1, showgrid=True, gridcolor='#2B3040', zeroline=False)
+                fig.update_yaxes(title_text="총 수량증감", row=2, col=1, showgrid=True, gridcolor='#2B3040', zeroline=True, zerolinecolor='#404658')
+                # =====================================================================
                 
                 st.plotly_chart(fig, use_container_width=True)
 
