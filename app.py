@@ -193,11 +193,11 @@ if etf_data:
 
 
 # =====================================================================
-# 3. 📊 [진짜 엔진] 5영업일 누적 "순매수 대금(수량×단가)" 찐 주도주 
+# 3. 📊 [진짜 엔진] 5영업일 누적 매수/매도 절대값 기준 TOP 20 
 # =====================================================================
 st.markdown("---")
-st.header("🔥 최근 5영업일 누적 순매수대금(수량×단가) 찐 주도주 TOP 20")
-st.markdown("**💡 비중 착시를 완벽히 제거! 5일간 기관이 '실제 현금'을 가장 많이 쏟아부은 진짜 주도주를 찾습니다.**")
+st.header("🔥 최근 5영업일 누적 순매수/순매도 격전지 TOP 20")
+st.markdown("**💡 비중 착시 제거! 5일간 기관이 가장 격렬하게 돈을 움직인(매수 또는 매도) 진짜 격전지를 보여줍니다.**")
 
 time_agg = {}
 koact_agg = {}
@@ -230,7 +230,6 @@ for etf_name, raw_df in etf_data.items():
         diff_col = f"{stock}_증감"
         if diff_col not in df.columns: continue
         
-        # 💡 [핵심 패치 1] 어느 ETF에서 매수 대금이 가장 많이 들어왔는지 추적하기 위한 방(etf_5d)을 만듭니다!
         if stock not in cat_agg:
             cat_agg[stock] = {'1d': 0.0, '3d': 0.0, '5d': 0.0, 'etf_5d': {}}
             
@@ -262,19 +261,18 @@ for etf_name, raw_df in etf_data.items():
         cat_agg[stock]['3d'] += val_3d
         cat_agg[stock]['5d'] += val_5d
         
-        # 💡 [핵심 패치 2] 해당 ETF의 5일 누적 순매수 대금을 꼬리표로 저장해 둡니다.
         if etf_name not in cat_agg[stock]['etf_5d']:
             cat_agg[stock]['etf_5d'][etf_name] = 0.0
         cat_agg[stock]['etf_5d'][etf_name] += val_5d
 
 global_latest_date = max(all_dates) if all_dates else "알수없음"
 
+# 💡 [필터 완전 해제] 0원만 아니면 무조건 리스트에 쓸어 담습니다! (마이너스도 OK)
 time_records = []
 for stock, flows in time_agg.items():
-    # 💡 [필터 해제] if flows['5d'] > 0: 조건을 과감하게 삭제했습니다! 
-    # 이제 마이너스 수급이라도 상대적으로 덜 팔린 상위 종목들을 20개까지 꽉 채웁니다.
-    if flows['etf_5d']: # 데이터가 비어있지 않은 경우만
-        best_etf = max(flows['etf_5d'], key=flows['etf_5d'].get)
+    if flows['etf_5d']: 
+        # 이 종목을 가장 격렬하게 사고판 대장 ETF 찾기 (절대값 기준)
+        best_etf = max(flows['etf_5d'], key=lambda k: abs(flows['etf_5d'][k]))
         etf_short = best_etf.replace('TIME ', '').replace('TIME', '').replace('KoAct ', '').replace('KoAct', '').strip()
         
         time_records.append({
@@ -288,24 +286,8 @@ for stock, flows in time_agg.items():
 
 koact_records = []
 for stock, flows in koact_agg.items():
-    # 💡 [필터 해제] KoAct 역시 필터를 삭제하여 20개를 꽉 채웁니다.
     if flows['etf_5d']:
-        best_etf = max(flows['etf_5d'], key=flows['etf_5d'].get)
-        etf_short = best_etf.replace('TIME ', '').replace('TIME', '').replace('KoAct ', '').replace('KoAct', '').strip()
-        
-        koact_records.append({
-            '기준일자': global_latest_date, 
-            '종목명': stock,
-            '표시명': f"{stock}<br>({etf_short})",
-            '당일순매수(백만)': round(flows['1d'] / 1000000, 1),
-            '3영업일순매수(백만)': round(flows['3d'] / 1000000, 1),
-            '5영업일순매수(백만)': round(flows['5d'] / 1000000, 1)
-        })
-
-koact_records = []
-for stock, flows in koact_agg.items():
-    if flows['5d'] > 0:
-        best_etf = max(flows['etf_5d'], key=flows['etf_5d'].get)
+        best_etf = max(flows['etf_5d'], key=lambda k: abs(flows['etf_5d'][k]))
         etf_short = best_etf.replace('TIME ', '').replace('TIME', '').replace('KoAct ', '').replace('KoAct', '').strip()
         
         koact_records.append({
@@ -323,7 +305,19 @@ def draw_top20_money_chart(records, category_name, color_map):
         return []
     
     df_res = pd.DataFrame(records)
-    df_res = df_res.sort_values(by='5영업일순매수(백만)', ascending=False).head(20)
+    
+    # 💡 [진짜 핵심 패치] 거래 금액의 '절대값'을 기준으로 정렬합니다!
+    df_res['절대값'] = df_res['5영업일순매수(백만)'].abs()
+    
+    # 0원짜리 투명 막대기(안 산 종목)는 아예 차트에서 퇴출!
+    df_non_zero = df_res[df_res['절대값'] > 0]
+    
+    if len(df_non_zero) > 0:
+        # 돈이 움직인 종목 중 가장 크게 움직인 20개 선정
+        df_res = df_non_zero.sort_values(by='절대값', ascending=False).head(20)
+    else:
+        df_res = df_res.head(20)
+
     date_str = df_res['기준일자'].iloc[0]
     
     df_melted = df_res.melt(
@@ -336,16 +330,15 @@ def draw_top20_money_chart(records, category_name, color_map):
     
     fig = px.bar(
         df_melted, x='표시명', y='순매수대금(백만원)', color='기간', barmode='group', text='순매수대금(백만원)',
-        title=f"{title_emoji} [{category_name} 그룹 전체통합] 5일 집중 순매수 대금 TOP 20 ({date_str} 기준)",
+        title=f"{title_emoji} [{category_name} 그룹 통합] 5일 집중 매수/매도 대금 TOP 20 ({date_str} 기준)",
         color_discrete_map=color_map
     )
     
-    fig.update_layout(xaxis_title="", yaxis_title="누적 순매수 대금 (단위: 백만원)", height=650, legend_title="매집 기간")
+    fig.update_layout(xaxis_title="", yaxis_title="누적 대금 (단위: 백만원 / 마이너스는 매도)", height=650, legend_title="매집 기간")
     fig.update_yaxes(zeroline=True, zerolinewidth=2, zerolinecolor='black')
     fig.update_traces(textposition='outside', textangle=-90, textfont_size=10)
     st.plotly_chart(fig, use_container_width=True)
     
-    # 💡 탭(Tab) 제목과 다크모드 차트로 넘길 때는 깔끔한 '진짜 종목명'만 리스트로 반환!
     return df_res['종목명'].tolist()
 
 # [TIME] 찐 주도주 렌더링
