@@ -203,12 +203,18 @@ time_agg = {}
 koact_agg = {}
 all_dates = []
 
-if etf_data: # 데이터가 있을 때만 실행!
+if etf_data:
+    # 💡 여기서부터 한 칸(스페이스 4칸) 들어갑니다.
     for etf_name, raw_df in etf_data.items():
-        # ... 기존 로직 ...
+        # 💡 여기는 두 칸(스페이스 8칸) 들어갑니다.
+        # 기존에 있던 차트 그리는 코드들을 여기에 그대로 두시면 됩니다.
+        st.write(f"### {etf_name} 분석 데이터") 
+        # (여기에 대표님의 기존 분석 로직들이 쭉 들어갑니다)
+        
 else:
+    # 💡 데이터가 아예 없을 때 실행되는 구역입니다.
     st.error("📉 데이터를 불러오지 못했습니다. 구글 시트 연결 및 Secrets 설정을 확인해 주세요.")
-    st.stop() # 여기서 멈춰서 에러 메시지만 보여줌
+    st.stop()
         
     df = raw_df.copy()
     if len(df.columns) <= 3: continue 
