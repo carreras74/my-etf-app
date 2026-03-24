@@ -10,7 +10,7 @@ import re
 import numpy as np
 
 # 1. 페이지 설정
-st.set_page_config(page_title="ETF 전종목 비중 추적 대시보드", layout="wide")
+st.set_page_config(page_title="ETF 퀀트 분석 대시보드", layout="wide")
 
 # =====================================================================
 # 🪄 [마법의 함수] HTS 다크모드 입체 분석 차트 자동 생성기
@@ -47,7 +47,6 @@ def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None, uni
                 
             diff_str = str(row[diff_col]) if diff_col in df.columns else ""
             qty_change = 0
-            q_str = diff_str
             
             if " | " in diff_str:
                 parts = diff_str.split(" | ")
@@ -55,9 +54,10 @@ def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None, uni
                 p_str = parts[1].strip()
                 match = re.search(r'₩([\d,]+)', p_str)
                 if match: agg_data[d]['Price'] = int(match.group(1).replace(',', ''))
+                
+                if '🔴▲' in q_str: qty_change = int(q_str.replace('🔴▲', '').replace(',', '').strip())
+                elif '🔵▼' in q_str: qty_change = -int(q_str.replace('🔵▼', '').replace(',', '').strip())
                     
-            if '🔴▲' in q_str: qty_change = int(q_str.replace('🔴▲', '').replace(',', '').strip())
-            elif '🔵▼' in q_str: qty_change = -int(q_str.replace('🔵▼', '').replace(',', '').strip())
             agg_data[d]['TotalQtyChange'] += qty_change
 
     plot_data = [{'Date': k, 'Weight': v['Weight'], 'Price': v['Price'], 'QtyChange': v['TotalQtyChange']} for k, v in agg_data.items()]
@@ -86,19 +86,40 @@ def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None, uni
     st.plotly_chart(fig, use_container_width=True, key=unique_key or f"chart_{stock_name}")
 
 # =====================================================================
-# 2. 구글 시트 엔진 (연결 및 로드)
+# 2. 구글 시트 데이터 로드 엔진 (중복 헤더 방어 패치 완료)
 # =====================================================================
 @st.cache_data(ttl=600)
 def load_data_from_google():
     try:
-        # 💡 Streamlit Secrets에 "google_key"가 올바른 JSON 형식이어야 합니다.
         creds_json = json.loads(st.secrets["google_key"])
         gc = gspread.service_account_from_dict(creds_json)
         sh = gc.open_by_key("1ZxIYeERuOWOWZudyjpMWpEWA0eljOct_uO9gXg6_2JA")
         worksheets = sh.worksheets()
-        return {ws.title: pd.DataFrame(ws.get_all_records()) for ws in worksheets if ws.get_all_records()}
+        
+        all_data = {}
+        for ws in worksheets:
+            data = ws.get_all_values()
+            if not data: continue
+            
+            # 💡 [핵심 보안패치] 중복된 제목('0', '6' 등)이 있으면 이름을 강제로 바꿈
+            headers = data[0]
+            seen = {}
+            new_headers = []
+            for h in headers:
+                h = str(h).strip() if h else "Unnamed"
+                count = seen.get(h, 0)
+                if count > 0:
+                    new_headers.append(f"{h}.{count}")
+                else:
+                    new_headers.append(h)
+                seen[h] = count + 1
+            
+            df = pd.DataFrame(data[1:], columns=new_headers)
+            if not df.empty:
+                all_data[ws.title] = df
+        return all_data
     except Exception as e:
-        st.error(f"❌ 구글 시트 연결 실패: {e}")
+        st.error(f"❌ 데이터 로드 실패: {e}")
         return None
 
 def draw_top20_money_chart(records, category_name, color_map):
@@ -106,6 +127,8 @@ def draw_top20_money_chart(records, category_name, color_map):
     df_res = pd.DataFrame(records)
     df_res['절대값'] = df_res['5영업일순매수(백만)'].abs()
     df_res = df_res[df_res['절대값'] > 0].sort_values(by='절대값', ascending=False).head(20)
+    
+    if df_res.empty: return []
     
     df_melted = df_res.melt(id_vars=['표시명'], value_vars=['5영업일순매수(백만)', '3영업일순매수(백만)', '당일순매수(백만)'], var_name='기간', value_name='금액')
     fig = px.bar(df_melted, x='표시명', y='금액', color='기간', barmode='group', title=f"🔥 {category_name} 그룹 수급 TOP 20", color_discrete_map=color_map)
@@ -121,23 +144,23 @@ etf_data = load_data_from_google()
 
 if etf_data:
     # --- [섹션 1: 범프 차트] ---
-    with st.container():
-        st.header("🏁 ETF 종목별 순위 변동 (Bump Chart)")
-        selected_etf = st.selectbox("분석할 ETF 선택", list(etf_data.keys()))
-        raw_df = etf_data[selected_etf].copy()
+    st.header("🏁 ETF 종목별 순위 변동 (Bump Chart)")
+    selected_etf = st.selectbox("분석할 ETF 선택", list(etf_data.keys()))
+    raw_df = etf_data[selected_etf].copy()
+    
+    if len(raw_df.columns) > 3:
+        date_col = raw_df.columns[0]
+        stock_cols = [c for c in raw_df.columns if c != date_col and not str(c).endswith('_증감')]
+        df_weight = raw_df[[date_col] + stock_cols].melt(id_vars=[date_col], var_name='종목명', value_name='비중')
+        df_weight['비중'] = pd.to_numeric(df_weight['비중'], errors='coerce').fillna(0)
+        df_weight[date_col] = pd.to_datetime(df_weight[date_col])
+        df_weight['순위'] = df_weight.groupby(date_col)['비중'].rank(method='first', ascending=False)
         
-        if len(raw_df.columns) > 3:
-            date_col = raw_df.columns[0]
-            stock_cols = [c for c in raw_df.columns if c != date_col and not str(c).endswith('_증감')]
-            df_weight = raw_df[[date_col] + stock_cols].melt(id_vars=[date_col], var_name='종목명', value_name='비중')
-            df_weight[date_col] = pd.to_datetime(df_weight[date_col])
-            df_weight['순위'] = df_weight.groupby(date_col)['비중'].rank(method='first', ascending=False)
-            
-            fig_bump = px.line(df_weight, x=date_col, y='순위', color='종목명', markers=True)
-            fig_bump.update_layout(yaxis=dict(autorange="reversed", tickmode="linear", dtick=1), template="plotly_dark", height=600)
-            st.plotly_chart(fig_bump, use_container_width=True)
+        fig_bump = px.line(df_weight, x=date_col, y='순위', color='종목명', markers=True)
+        fig_bump.update_layout(yaxis=dict(autorange="reversed", tickmode="linear", dtick=1), template="plotly_dark", height=600)
+        st.plotly_chart(fig_bump, use_container_width=True)
 
-    # --- [섹션 2: 수급 격전지 분석] ---
+    # --- [섹션 2: 수급 격전지 분석 엔진] ---
     st.divider()
     st.header("🔥 최근 5영업일 누적 순매수/매도 격전지")
     
@@ -151,7 +174,10 @@ if etf_data:
         df = df.sort_values(by=d_col)
         all_dates.extend(df[d_col].dt.strftime('%Y-%m-%d').tolist())
         
-        target_agg = time_agg if "TIME" in name else koact_agg
+        # 💡 그룹 판별
+        target_agg = time_agg if "TIME" in name else (koact_agg if "KoAct" in name else None)
+        if target_agg is None: continue
+            
         last_5, last_3, last_1 = df.tail(5), df.tail(3), df.tail(1)
         stocks = [c for c in df.columns if c != d_col and not str(c).endswith('_증감')]
 
@@ -165,9 +191,13 @@ if etf_data:
                 for v in sub[diff_c]:
                     if " | " in str(v):
                         q_p = str(v).split(" | ")
-                        q = int(q_p[0].replace('🔴▲','').replace('🔵▼','-').replace(',','').strip())
-                        p = int(re.search(r'₩([\d,]+)', q_p[1]).group(1).replace(',','')) if '₩' in q_p[1] else 0
-                        total += (q * p)
+                        q_str = q_p[0].replace('🔴▲','').replace('🔵▼','-').replace(',','').strip()
+                        try:
+                            q = int(q_str)
+                            p_match = re.search(r'₩([\d,]+)', q_p[1])
+                            p = int(p_match.group(1).replace(',','')) if p_match else 0
+                            total += (q * p)
+                        except: continue
                 return total
 
             v1, v3, v5 = get_val(last_1), get_val(last_3), get_val(last_5)
@@ -193,14 +223,14 @@ if etf_data:
     # --- [섹션 3: 내 매입 종목 분석] ---
     st.divider()
     st.header("🦅 내 매입 종목 입체 분석")
-    ledger_url = f"https://raw.githubusercontent.com/carreras74/ETF_Auto_Bot/main/{urllib.parse.quote('매입장부.xlsx')}"
     try:
+        ledger_url = f"https://raw.githubusercontent.com/carreras74/ETF_Auto_Bot/main/{urllib.parse.quote('매입장부.xlsx')}"
         ledger = pd.read_excel(ledger_url)
         for _, row in ledger.iterrows():
             draw_hts_chart(row['종목명'], etf_data, buy_price=row.get('매수단가'), unique_key=f"my_{row['종목명']}")
     except:
-        st.info("매입장부를 불러올 수 없습니다. GitHub 경로를 확인하세요.")
+        st.info("💡 매입장부(Excel)를 불러올 수 없습니다. GitHub 저장소에 '매입장부.xlsx'가 있는지 확인하세요.")
 
 else:
-    st.error("데이터 로드에 실패했습니다. 구글 시트 및 Secrets 설정을 확인해 주세요.")
+    st.error("데이터 로드에 실패했습니다. 구글 시트 제목 중복이나 Secrets 설정을 확인해 주세요.")
 
