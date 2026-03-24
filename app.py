@@ -271,15 +271,32 @@ global_latest_date = max(all_dates) if all_dates else "알수없음"
 
 time_records = []
 for stock, flows in time_agg.items():
-    if flows['5d'] > 0: # 5일 누적 현금이 들어온 종목만
-        # 💡 [핵심 패치 3] 이 종목에 가장 돈을 많이 쓴 '1등 공신 대장 ETF'를 찾습니다!
+    # 💡 [필터 해제] if flows['5d'] > 0: 조건을 과감하게 삭제했습니다! 
+    # 이제 마이너스 수급이라도 상대적으로 덜 팔린 상위 종목들을 20개까지 꽉 채웁니다.
+    if flows['etf_5d']: # 데이터가 비어있지 않은 경우만
         best_etf = max(flows['etf_5d'], key=flows['etf_5d'].get)
         etf_short = best_etf.replace('TIME ', '').replace('TIME', '').replace('KoAct ', '').replace('KoAct', '').strip()
         
         time_records.append({
             '기준일자': global_latest_date, 
-            '종목명': stock, # 진짜 종목명 (탭 제목용)
-            '표시명': f"{stock}<br>({etf_short})", # X축 표시용 (종목명 + 대장 ETF)
+            '종목명': stock, 
+            '표시명': f"{stock}<br>({etf_short})", 
+            '당일순매수(백만)': round(flows['1d'] / 1000000, 1),
+            '3영업일순매수(백만)': round(flows['3d'] / 1000000, 1),
+            '5영업일순매수(백만)': round(flows['5d'] / 1000000, 1)
+        })
+
+koact_records = []
+for stock, flows in koact_agg.items():
+    # 💡 [필터 해제] KoAct 역시 필터를 삭제하여 20개를 꽉 채웁니다.
+    if flows['etf_5d']:
+        best_etf = max(flows['etf_5d'], key=flows['etf_5d'].get)
+        etf_short = best_etf.replace('TIME ', '').replace('TIME', '').replace('KoAct ', '').replace('KoAct', '').strip()
+        
+        koact_records.append({
+            '기준일자': global_latest_date, 
+            '종목명': stock,
+            '표시명': f"{stock}<br>({etf_short})",
             '당일순매수(백만)': round(flows['1d'] / 1000000, 1),
             '3영업일순매수(백만)': round(flows['3d'] / 1000000, 1),
             '5영업일순매수(백만)': round(flows['5d'] / 1000000, 1)
@@ -396,3 +413,4 @@ except Exception as e:
     st.warning(f"⚠️ 매입장부 데이터를 불러오는 중 에러가 발생했습니다: {e}")
 
 st.markdown("<br><br><br>", unsafe_allow_html=True)
+
