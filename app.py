@@ -203,12 +203,12 @@ time_agg = {}
 koact_agg = {}
 all_dates = []
 
-for etf_name, raw_df in etf_data.items():
-    if "TIME" in etf_name or "타임" in etf_name:
-        cat_agg = time_agg
-    elif "KoAct" in etf_name or "코액트" in etf_name:
-        cat_agg = koact_agg
-    else: continue
+if etf_data: # 데이터가 있을 때만 실행!
+    for etf_name, raw_df in etf_data.items():
+        # ... 기존 로직 ...
+else:
+    st.error("📉 데이터를 불러오지 못했습니다. 구글 시트 연결 및 Secrets 설정을 확인해 주세요.")
+    st.stop() # 여기서 멈춰서 에러 메시지만 보여줌
         
     df = raw_df.copy()
     if len(df.columns) <= 3: continue 
