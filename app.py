@@ -101,7 +101,7 @@ def load_data_from_google():
             data = ws.get_all_values()
             if not data: continue
             
-            # 💡 [핵심 보안패치] 중복된 제목('0', '6' 등)이 있으면 이름을 강제로 바꿈
+            # 💡 [중요 패치] 중복된 제목('0', '6' 등)이 있으면 이름을 자동으로 보정
             headers = data[0]
             seen = {}
             new_headers = []
@@ -174,7 +174,7 @@ if etf_data:
         df = df.sort_values(by=d_col)
         all_dates.extend(df[d_col].dt.strftime('%Y-%m-%d').tolist())
         
-        # 💡 그룹 판별
+        # 그룹 판별
         target_agg = time_agg if "TIME" in name else (koact_agg if "KoAct" in name else None)
         if target_agg is None: continue
             
@@ -204,7 +204,7 @@ if etf_data:
             target_agg[s]['1d'] += v1; target_agg[s]['3d'] += v3; target_agg[s]['5d'] += v5
             target_agg[s]['etf_5d'][name] = target_agg[s]['etf_5d'].get(name, 0) + v5
 
-    latest_date = max(all_dates) if all_dates else ""
+    latest_date = max(all_dates) if all_dates else "알 수 없음"
     
     def prep_records(agg):
         recs = []
@@ -231,6 +231,8 @@ if etf_data:
     except:
         st.info("💡 매입장부(Excel)를 불러올 수 없습니다. GitHub 저장소에 '매입장부.xlsx'가 있는지 확인하세요.")
 
+else:
+    st.error("데이터 로드에 실패했습니다. 구글 시트 제목 중복이나 Secrets 설정을 확인해 주세요.")
 else:
     st.error("데이터 로드에 실패했습니다. 구글 시트 제목 중복이나 Secrets 설정을 확인해 주세요.")
 
