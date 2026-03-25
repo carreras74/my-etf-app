@@ -52,13 +52,11 @@ if not etf_data:
 
 # =====================================================================
 # 💡 [핵심 패치] 데이터 신선도 감지 (Fail-Safe 알림창)
-# 한국 시간(KST) 기준으로 오늘 날짜와 데이터의 최신 날짜를 비교합니다.
 # =====================================================================
 kst = pytz.timezone('Asia/Seoul')
 today_kst = datetime.datetime.now(kst).date()
 latest_dates_in_db = []
 
-# 데이터 20일치 필터링 및 최신 날짜 추출
 for etf_name, df in etf_data.items():
     if len(df.columns) > 0:
         date_col = df.columns[0]
@@ -72,10 +70,8 @@ for etf_name, df in etf_data.items():
         df[date_col] = df[date_col].dt.strftime('%Y-%m-%d')
         etf_data[etf_name] = df
 
-# 알림 배너 출력
 if latest_dates_in_db:
     overall_latest_date = max(latest_dates_in_db)
-    # 주말(토,일)은 장이 안 열리므로 제외하고, 평일인데 데이터가 오늘 날짜가 아니면 경고
     if overall_latest_date < today_kst and today_kst.weekday() < 5:
         st.warning(f"⚠️ **자동 수집 지연/실패 알림:** 오늘({today_kst.strftime('%m월 %d일')}) 데이터가 아직 구글 시트에 반영되지 않았습니다. 차트 붕괴를 막기 위해 가장 최신인 **{overall_latest_date.strftime('%m월 %d일')}**까지의 데이터를 안전하게 표시 중입니다.")
     elif overall_latest_date == today_kst:
@@ -108,7 +104,8 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
         row_data = ledger_df[ledger_df['종목명'] == stock_name]
         if not row_data.empty:
             b_date_val, b_price_val = row_data.iloc[0].get('매수일자'), row_data.iloc[0].get('매수단가')
-            if pd.notna(b_date_val): buy_date = pd.to_datetime(b_date_val).strftime('%Y-%m-%d')
+            # 💡 [디테일 패치] 매수일자 세로선도 '월-일' 포맷으로 맞춤
+            if pd.notna(b_date_val): buy_date = pd.to_datetime(b_date_val).strftime('%m-%d')
             if pd.notna(b_price_val):
                 if isinstance(b_price_val, str): b_price_val = b_price_val.replace(',', '').replace('원', '').strip()
                 buy_price = float(b_price_val)
@@ -160,9 +157,13 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     
     p_df['DateObj'] = pd.to_datetime(p_df['Date'], errors='coerce')
     p_df = p_df.dropna(subset=['DateObj']).sort_values('DateObj')
-    p_df['Date'] = p_df['DateObj'].dt.strftime('%Y-%m-%d')
+    # 💡 [디테일 패치] X축 날짜 포맷을 '월-일(MM-DD)'로 간소화
+    p_df['Date'] = p_df['DateObj'].dt.strftime('%m-%d')
     p_df = p_df.drop(columns=['DateObj'])
     p_df['Price'] = p_df['Price'].ffill().bfill()
+    
+    # 💡 [디테일 패치] 순매수 금액(AmtChange)을 소수점 없이 깔끔한 정수로 반올림
+    p_df['AmtChange'] = p_df['AmtChange'].round(0)
     valid_p_df = p_df.dropna(subset=['Price'])
     
     st.subheader(f"📊 {stock_name} 정밀 분석 (1층: 주가 / 2층: 수량증감 / 3층: 금액증감)")
@@ -173,15 +174,18 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     )
     
     fig.update_xaxes(type='category')
-    fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['Weight'], name=f'{best_etf} 비중(%)', opacity=0.3, marker_color='#82B1FF', width=0.35), row=1, col=1, secondary_y=False)
     
-    fig.add_trace(go.Scatter(x=valid_p_df['Date'], y=valid_p_df['Price'], name='주가(원)', mode='lines+markers', line=dict(color='#FFCA28', width=3), marker=dict(size=6, color='#FFCA28')), row=1, col=1, secondary_y=True)
+    # 1층
+    fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['Weight'], name=f'{best_etf} 비중(%)', opacity=0.3, marker_color='#82B1FF', width=0.35, hovertemplate='%{x}<br>비중: %{y:.2f}%<extra></extra>'), row=1, col=1, secondary_y=False)
+    fig.add_trace(go.Scatter(x=valid_p_df['Date'], y=valid_p_df['Price'], name='주가(원)', mode='lines+markers', line=dict(color='#FFCA28', width=3), marker=dict(size=6, color='#FFCA28'), hovertemplate='%{x}<br>주가: %{y:,.0f}원<extra></extra>'), row=1, col=1, secondary_y=True)
     
+    # 2층
     colors = ['#FF5252' if q > 0 else '#448AFF' if q < 0 else '#555555' for q in p_df['QtyChange']]
-    fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['QtyChange'], name='수량 증감(주)', marker_color=colors, width=0.4), row=2, col=1)
+    fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['QtyChange'], name='수량 증감(주)', marker_color=colors, width=0.4, hovertemplate='%{x}<br>수량: %{y:,.0f}주<extra></extra>'), row=2, col=1)
     
+    # 3층
     text_amt = p_df['AmtChange'].apply(lambda x: f"{x:,.0f}M" if x != 0 else "")
-    fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['AmtChange'], name='순매수 금액(백만)', marker_color=colors, width=0.4, text=text_amt, textposition='outside', textfont=dict(color='white', size=10)), row=3, col=1)
+    fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['AmtChange'], name='순매수 금액(백만)', marker_color=colors, width=0.4, text=text_amt, textposition='outside', textfont=dict(color='white', size=10), hovertemplate='%{x}<br>순매수: %{y:,.0f}백만원<extra></extra>'), row=3, col=1)
     
     if not p_df.empty:
         if buy_price is not None:
