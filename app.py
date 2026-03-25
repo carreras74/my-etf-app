@@ -48,6 +48,24 @@ if not etf_data:
     st.warning("데이터를 정상적으로 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.")
     st.stop()
 
+# =====================================================================
+# 💡 [핵심 패치] 전역 데이터 다이어트 (최근 20영업일 데이터만 유지!)
+# 구글 시트에서 전체 데이터를 불러오자마자, 여기서 최신 20일치만 남깁니다.
+# 이렇게 하면 아래의 모든 차트와 분석 로직이 자동으로 가볍고 빠르게 20일치만 분석합니다.
+# =====================================================================
+for etf_name, df in etf_data.items():
+    if len(df.columns) > 0:
+        date_col = df.columns[0]
+        # 날짜 형식으로 변환 후 과거부터 최신순으로 정렬
+        df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+        df = df.dropna(subset=[date_col]).sort_values(by=date_col)
+        # 최신 20영업일(약 한 달) 데이터만 싹둑 자르기
+        df = df.tail(20)
+        # 기존 로직과 충돌하지 않도록 다시 깔끔한 문자열(YYYY-MM-DD)로 되돌려놓기
+        df[date_col] = df[date_col].dt.strftime('%Y-%m-%d')
+        etf_data[etf_name] = df
+
+
 # 3. 매입장부 데이터 로드
 @st.cache_data(ttl=600)
 def load_ledger_data():
@@ -64,7 +82,7 @@ def load_ledger_data():
 ledger_df = load_ledger_data()
 
 # =====================================================================
-# 💡 [핵심 패치] 3단 입체 분석 차트 만능 함수 
+# 💡 3단 입체 분석 차트 만능 함수 
 # =====================================================================
 def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     buy_date, buy_price = None, None
@@ -213,7 +231,7 @@ df['종가/등락률'] = df['수량증감'].apply(format_price)
 latest_date_val = df[date_col_name].max()
 latest_order = df[df[date_col_name] == latest_date_val].sort_values(by=weight_col_name, ascending=False)[name_col_name].tolist()
 
-st.subheader(f"📅 {selected_etf} 실시간 비중 변동 추이 (상세 확대 모드)")
+st.subheader(f"📅 {selected_etf} 실시간 비중 변동 추이 (최근 20영업일)")
 
 fig = px.line(
     df, x=date_col_name, y='순위', color=name_col_name, markers=True,
@@ -230,9 +248,8 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig, use_container_width=True, key="main_bump_chart")
-st.info(f"✅ 총 {len(df[name_col_name].unique())}개 종목이 그래프에 표시되고 있습니다.")
+st.info(f"✅ 총 {len(df[name_col_name].unique())}개 종목이 최근 20일간의 그래프에 표시되고 있습니다.")
 
-# 💡 [복구 완료] 구글 시트 원본 데이터 펴보기
 with st.expander("📊 구글 시트 원본 데이터 펴보기 (종목별 수량증감 상세 조회)"):
     st.markdown("**💡 구글 시트와 동일한 원본 데이터입니다. 표 안에서 스크롤하거나 우측 상단의 확대 버튼을 누르시면 더 크게 볼 수 있습니다.**")
     st.dataframe(raw_df, use_container_width=True, hide_index=True)
@@ -362,7 +379,7 @@ if not top20_combined.empty:
                 df_raw = etf_data[e_name].copy()
                 date_col = df_raw.columns[0]
                 df_raw[date_col] = pd.to_datetime(df_raw[date_col])
-                df_raw = df_raw.sort_values(by=date_col).tail(20)
+                df_raw = df_raw.sort_values(by=date_col).tail(20) # (이미 위에서 잘렸지만 안전을 위해 유지)
                 
                 col_name = f"{s_name}_증감"
                 if col_name in df_raw.columns:
