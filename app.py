@@ -78,7 +78,6 @@ def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None, uni
     
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08, row_heights=[0.7, 0.3], specs=[[{"secondary_y": True}], [{"secondary_y": False}]])
     
-    # 💡 입체 분석 차트의 X축도 주말을 없애기 위해 'category' 지정
     fig.update_xaxes(type='category')
     
     fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['Weight'], name='비중(%)', opacity=0.5, marker_color='#AEC7E8', width=0.35), row=1, col=1, secondary_y=False)
@@ -96,7 +95,7 @@ def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None, uni
     st.plotly_chart(fig, use_container_width=True, key=unique_key or f"chart_{stock_name}")
 
 # =====================================================================
-# 2. 구글 시트 데이터 로드 (중복 헤더 방어 패치)
+# 2. 구글 시트 데이터 로드
 # =====================================================================
 @st.cache_data(ttl=600)
 def load_data_from_google():
@@ -135,13 +134,12 @@ def load_data_from_google():
 st.title("📈 ETF 퀀트 분석 대시보드")
 etf_data = load_data_from_google()
 
-# 💡 [핵심 패치] 데이터가 없으면 여기서 프로그램 실행을 완전히 멈춥니다! (else 지옥 탈출)
 if not etf_data:
-    st.error("데이터 로드에 실패했습니다. 구글 시트 연결을 확인해 주세요.")
-    st.stop() 
+    st.error("데이터 로드에 실패했습니다.")
+    st.stop()
 
-# --- [섹션 1: 범프 차트] ---
-st.header("🏁 ETF 종목별 순위 변동 (Bump Chart)")
+# --- [섹션 1: 범프 차트 (상위 20위 정예화 버전)] ---
+st.header("🏁 ETF 종목별 순위 변동 (TOP 20 Bump Chart)")
 selected_etf = st.sidebar.selectbox("분석할 ETF 선택", list(etf_data.keys()))
 st.sidebar.markdown("<br>" * 15, unsafe_allow_html=True)
 
@@ -152,24 +150,27 @@ if len(raw_df.columns) > 3:
     df_weight = raw_df[[date_col] + stock_cols].copy().melt(id_vars=[date_col], var_name='종목명', value_name='비중')
     
     df_weight[date_col] = pd.to_datetime(df_weight[date_col])
-    # 💡 주말을 지우기 위해 날짜를 '달력'이 아닌 '글자(문자열)'로 바꿉니다.
     df_weight['날짜_문자열'] = df_weight[date_col].dt.strftime('%Y-%m-%d')
+    df_weight['비중'] = pd.to_numeric(df_weight['비중'].astype(str).str.replace('%',''), errors='coerce').fillna(0)
     
-    df_weight['비중'] = pd.to_numeric(df_weight['비중'], errors='coerce').fillna(0)
+    # 순위 계산
     df_weight['순위'] = df_weight.groupby(date_col)['비중'].rank(method='first', ascending=False)
     
-    latest_date = df_weight[date_col].max()
-    latest_order = df_weight[df_weight[date_col] == latest_date].sort_values(by='비중', ascending=False)['종목명'].tolist()
+    # 💡 [핵심 패치] 상위 20위까지만 필터링하여 노이즈 제거!
+    df_weight = df_weight[df_weight['순위'] <= 20]
     
-    # X축을 '날짜_문자열'로 지정
+    latest_date = df_weight[date_col].max()
+    # 범례 정렬을 위해 최신 날짜의 TOP 20 순서 추출
+    latest_order = df_weight[df_weight[date_col] == latest_date].sort_values(by='순위')['종목명'].tolist()
+    
     fig_bump = px.line(df_weight, x='날짜_문자열', y='순위', color='종목명', markers=True, category_orders={'종목명': latest_order})
     
-    # 💡 X축 type을 'category'로 강제해서 주말 공백을 완벽히 압축합니다.
     fig_bump.update_layout(
-        yaxis=dict(title="종목 순위 (등수)", autorange="reversed", tickmode="linear", dtick=1), 
+        yaxis=dict(title="종목 순위 (1~20위)", autorange="reversed", tickmode="linear", dtick=1, range=[20.5, 0.5]), 
         xaxis=dict(type='category', title="날짜"), 
         template="plotly_dark", 
-        height=800
+        height=850,
+        legend=dict(title="종목명 (TOP 20)", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02)
     )
     st.plotly_chart(fig_bump, use_container_width=True)
     
@@ -207,14 +208,11 @@ for name, df in etf_data.items():
                 if " | " in str(v):
                     parts = str(v).split(" | ")
                     q_str, p_str = parts[0].strip(), parts[1].strip()
-                    
                     q_num = re.sub(r'[^\d]', '', q_str)
                     qty = int(q_num) if q_num else 0
                     if any(x in q_str for x in ['🔵', '▼', '-', '하락']): qty = -qty
-                    
                     p_num = re.sub(r'[^\d]', '', p_str)
                     price = int(p_num) if p_num else 0
-                    
                     n_buy += (qty * price)
             return n_buy
 
@@ -237,15 +235,11 @@ def draw_top20(records, title, color_map):
     if not records:
         st.info(f"{title} 데이터가 없습니다.")
         return []
-        
     res = pd.DataFrame(records)
     res['절대값'] = res['5d'].abs()
     res = res[res['절대값'] > 0].sort_values(by='절대값', ascending=False).head(20)
-    
     if res.empty: return []
-    
     melted = res.melt(id_vars=['표시명'], value_vars=['5d', '3d', '1d'], var_name='기간', value_name='순매수(백만)')
-    
     emo = "🔥" if title=="TIME" else "🌊"
     fig = px.bar(melted, x='표시명', y='순매수(백만)', color='기간', barmode='group', title=f"{emo} [{title} 통합] 5일 집중 매수/매도 격전지 TOP 20", color_discrete_map=color_map)
     fig.update_layout(template="plotly_dark", height=600, yaxis_title="누적 대금 (단위: 백만원)")
