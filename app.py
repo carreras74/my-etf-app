@@ -11,7 +11,8 @@ st.title("📈 ETF 종목별 순위 변동 추이 (범프 차트)")
 # 2. 구글 시트 연결 (스트림릿 클라우드 비밀금고 사용)
 spreadsheet_id = "1ZxIYeERuOWOWZudyjpMWpEWA0eljOct_uO9gXg6_2JA"
 
-@st.cache_data(ttl=3600)
+# 💡 [Pro 패치] API 429 에러 방지를 위해 캐시 유지 시간을 2시간(7200초)으로 늘렸습니다.
+@st.cache_data(ttl=7200)
 def load_data_from_google():
     try:
         creds_json = json.loads(st.secrets["google_key"])
@@ -22,144 +23,136 @@ def load_data_from_google():
         all_data = {ws.title: pd.DataFrame(ws.get_all_records()) for ws in worksheets if ws.get_all_records()}
         return all_data
     except Exception as e:
-        st.error(f"데이터 로드 실패: {e}")
+        # API 할당량 초과 시 명확한 에러 메시지 출력
+        if "429" in str(e):
+            st.error("⚠️ 구글 시트 API 트래픽이 초과되었습니다(429 에러). 약 1~2분 뒤에 새로고침해 주세요.")
+        else:
+            st.error(f"데이터 로드 실패: {e}")
         return None
 
 etf_data = load_data_from_google()
 
-if etf_data:
-    selected_etf = st.sidebar.selectbox("ETF 선택", list(etf_data.keys()))
+# =====================================================================
+# 💡 [Pro 패치] 핵심 방어 로직: 데이터가 없으면 여기서 앱 실행을 완전히 멈춥니다!
+# 이렇게 하면 아래쪽 코드에서 에러가 터지는 것을 100% 방지할 수 있습니다.
+# =====================================================================
+if not etf_data:
+    st.warning("데이터를 정상적으로 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.")
+    st.stop()
+
+# 여기서부터는 데이터가 정상적으로 로드되었을 때만 실행됩니다.
+selected_etf = st.sidebar.selectbox("ETF 선택", list(etf_data.keys()))
+
+# 💡 [UI/UX 디테일 패치] 사이드바 드롭다운 무조건 '아래로' 열리게 강제하기
+st.sidebar.markdown("<br>" * 15, unsafe_allow_html=True)
+
+# 💡 [핵심] raw_df가 바로 구글 시트 원본 그 자체입니다!
+raw_df = etf_data[selected_etf].copy()
+
+if len(raw_df.columns) > 3:
+    date_col = raw_df.columns[0]
+    stock_cols = [c for c in raw_df.columns if c != date_col and not str(c).endswith('_증감')]
     
-    # =====================================================================
-    # 💡 [UI/UX 디테일 패치] 사이드바 드롭다운 무조건 '아래로' 열리게 강제하기
-    # 투명한 엔터키(<br>)를 15번 쳐서 아래 공간을 넉넉하게 확보해 줍니다!
-    # =====================================================================
-    st.sidebar.markdown("<br>" * 15, unsafe_allow_html=True)
+    df_weight = raw_df[[date_col] + stock_cols].copy()
+    df_weight = df_weight.melt(id_vars=[date_col], var_name='종목명', value_name='비중')
     
-    # 💡 [핵심] raw_df가 바로 구글 시트 원본 그 자체입니다!
-    raw_df = etf_data[selected_etf].copy()
-
-    if len(raw_df.columns) > 3:
-        date_col = raw_df.columns[0]
-        stock_cols = [c for c in raw_df.columns if c != date_col and not str(c).endswith('_증감')]
-        
-        df_weight = raw_df[[date_col] + stock_cols].copy()
-        df_weight = df_weight.melt(id_vars=[date_col], var_name='종목명', value_name='비중')
-        
-        change_cols = [f"{c}_증감" for c in stock_cols if f"{c}_증감" in raw_df.columns]
-        df_change = raw_df[[date_col] + change_cols].copy()
-        df_change.columns = [date_col] + [c.replace('_증감', '') for c in change_cols]
-        df_change = df_change.melt(id_vars=[date_col], var_name='종목명', value_name='수량증감')
-        
-        df = pd.merge(df_weight, df_change, on=[date_col, '종목명'], how='left')
-        
-    else:
-        df = raw_df.copy()
-        date_col, name_col, weight_col = df.columns[0], df.columns[1], df.columns[2]
-        df.columns = ['일자', '종목명', '비중']
-        df['수량증감'] = "-" 
-        date_col, name_col, weight_col = '일자', '종목명', '비중'
-
-    df[df.columns[0]] = pd.to_datetime(df[df.columns[0]])
-    df['비중'] = pd.to_numeric(df['비중'], errors='coerce')
-    df = df.dropna(subset=['비중']).sort_values(by=df.columns[0])
+    change_cols = [f"{c}_증감" for c in stock_cols if f"{c}_증감" in raw_df.columns]
+    df_change = raw_df[[date_col] + change_cols].copy()
+    df_change.columns = [date_col] + [c.replace('_증감', '') for c in change_cols]
+    df_change = df_change.melt(id_vars=[date_col], var_name='종목명', value_name='수량증감')
     
-    date_col_name = df.columns[0]
-    name_col_name = '종목명'
-    weight_col_name = '비중'
+    df = pd.merge(df_weight, df_change, on=[date_col, '종목명'], how='left')
     
-    # 순위 계산 (그래프 내부 계산용으로만 남겨둡니다)
-    # =====================================================================
-    # 💡 [핵심 패치 1] 등수 세분화 및 겹침 방지 트릭
-    # 동점일 때 'min'(공동등수) 대신 'first'(먼저 나온 놈이 위)를 써서
-    # 모든 종목에 0.000...1 단위로라도 겹치지 않는 고유 순위를 부여합니다!
-    # =====================================================================
-    df['순위'] = df.groupby(date_col_name)[weight_col_name].rank(method='first', ascending=False)
-
-    # 툴팁에 보여줄 데이터 준비 (아까 세팅 유지)
-    def split_qty(val):
-        return str(val).split(' | ')[0] if ' | ' in str(val) else str(val)
-
-    def format_price(val):
-        if ' | ' not in str(val): return "-"
-        price_str = str(val).split(' | ')[1]
-        if '(+' in price_str:
-            return f"<span style='color:red'><b>{price_str}</b></span>"
-        elif '(-' in price_str:
-            return f"<span style='color:blue'><b>{price_str}</b></span>"
-        else:
-            return price_str
-
-    df['수량증감(주식수)'] = df['수량증감'].apply(split_qty)
-    df['종가/등락률'] = df['수량증감'].apply(format_price)
-
-    latest_date_val = df[date_col_name].max()
-    latest_order = df[df[date_col_name] == latest_date_val].sort_values(by=weight_col_name, ascending=False)[name_col_name].tolist()
-
-    st.subheader(f"📅 {selected_etf} 실시간 비중 변동 추이 (상세 확대 모드)")
-
-    # (차트 그리는 부분은 동일 유지)
-    fig = px.line(
-        df, x=date_col_name, y='순위', color=name_col_name, markers=True,
-        hover_name=name_col_name, category_orders={name_col_name: latest_order}, 
-        hover_data={
-            '순위': False,            
-            weight_col_name: True,    
-            '수량증감': False,        
-            '수량증감(주식수)': True,  # 💡 [여기!] 아까 잘못 들어갔던 '탭' 글자를 뺐습니다!
-            '종가/등락률': True,      
-            date_col_name: False,
-            name_col_name: False
-        }
-    )
-
-    fig.update_layout(
-        # 💡 핵심 2: Y축 디자인 완벽 개조 (그리드 선 제거!)
-        yaxis=dict(
-            title="종목 순위 (등수)", 
-            autorange="reversed", # 1등이 맨 위로
-            tickmode="linear",    # 소수점 없애기 (1, 2, 3...)
-            dtick=1,               # 1 단위로 간격 설정
-            
-            # 💡 [가독성 패치] 흐릿한 베이스 선(그리드)을 싹 지워버립니다!
-            showgrid=False,       # Y축 수평선 숨기기
-            zeroline=False,       # 제로 라인 숨기기
-            showticklabels=True   # ❌ Y축 숫자(등수)는 유지!
-        ),
-        xaxis=dict(
-            type="category", 
-            title="날짜",
-            # (보너스: X축 세로선도 지우면 더 깔끔합니다!)
-            showgrid=False        # X축 수직선 숨기기
-        ),
-        height=800,
-        legend=dict(title="종목명", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02),
-        hovermode="closest",
-        
-        # (깔끔한 화이트 라벨 유지)
-        hoverlabel=dict(
-            bgcolor="white",       
-            font_size=13,
-            font_color="black",    
-            font_family="Malgun Gothic, sans-serif",
-            bordercolor="#B0BEC5", 
-            align="left"
-        )
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-    st.info(f"✅ 총 {len(df[name_col_name].unique())}개 종목이 그래프에 표시되고 있습니다.")
-    
-    # =====================================================================
-    # 💡 [핵심 패치] 차트 바로 밑에 '구글 시트 원본 뷰어'를 달아드렸습니다!
-    # =====================================================================
-    with st.expander("📊 구글 시트 원본 데이터 펴보기 (종목별 수량증감 상세 조회)"):
-        st.markdown("**💡 구글 시트와 동일한 원본 데이터입니다. 표 안에서 스크롤하거나 우측 상단의 확대 버튼을 누르시면 더 크게 볼 수 있습니다.**")
-        # 구글 시트 원본 형태(raw_df)를 그대로 예쁘게 그려줍니다.
-        st.dataframe(raw_df, use_container_width=True, hide_index=True)
-
 else:
-    st.warning("데이터가 없습니다.")
+    df = raw_df.copy()
+    date_col, name_col, weight_col = df.columns[0], df.columns[1], df.columns[2]
+    df.columns = ['일자', '종목명', '비중']
+    df['수량증감'] = "-" 
+    date_col, name_col, weight_col = '일자', '종목명', '비중'
+
+df[df.columns[0]] = pd.to_datetime(df[df.columns[0]])
+df['비중'] = pd.to_numeric(df['비중'], errors='coerce')
+df = df.dropna(subset=['비중']).sort_values(by=df.columns[0])
+
+date_col_name = df.columns[0]
+name_col_name = '종목명'
+weight_col_name = '비중'
+
+# 순위 계산 (동점 처리 방지)
+df['순위'] = df.groupby(date_col_name)[weight_col_name].rank(method='first', ascending=False)
+
+# 툴팁에 보여줄 데이터 준비
+def split_qty(val):
+    return str(val).split(' | ')[0] if ' | ' in str(val) else str(val)
+
+def format_price(val):
+    if ' | ' not in str(val): return "-"
+    price_str = str(val).split(' | ')[1]
+    if '(+' in price_str:
+        return f"<span style='color:red'><b>{price_str}</b></span>"
+    elif '(-' in price_str:
+        return f"<span style='color:blue'><b>{price_str}</b></span>"
+    else:
+        return price_str
+
+df['수량증감(주식수)'] = df['수량증감'].apply(split_qty)
+df['종가/등락률'] = df['수량증감'].apply(format_price)
+
+latest_date_val = df[date_col_name].max()
+latest_order = df[df[date_col_name] == latest_date_val].sort_values(by=weight_col_name, ascending=False)[name_col_name].tolist()
+
+st.subheader(f"📅 {selected_etf} 실시간 비중 변동 추이 (상세 확대 모드)")
+
+# 차트 그리기
+fig = px.line(
+    df, x=date_col_name, y='순위', color=name_col_name, markers=True,
+    hover_name=name_col_name, category_orders={name_col_name: latest_order}, 
+    hover_data={
+        '순위': False,            
+        weight_col_name: True,    
+        '수량증감': False,        
+        '수량증감(주식수)': True,  
+        '종가/등락률': True,      
+        date_col_name: False,
+        name_col_name: False
+    }
+)
+
+fig.update_layout(
+    yaxis=dict(
+        title="종목 순위 (등수)", 
+        autorange="reversed", 
+        tickmode="linear",    
+        dtick=1,               
+        showgrid=False,       
+        zeroline=False,       
+        showticklabels=True   
+    ),
+    xaxis=dict(
+        type="category", 
+        title="날짜",
+        showgrid=False        
+    ),
+    height=800,
+    legend=dict(title="종목명", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02),
+    hovermode="closest",
+    hoverlabel=dict(
+        bgcolor="white",       
+        font_size=13,
+        font_color="black",    
+        font_family="Malgun Gothic, sans-serif",
+        bordercolor="#B0BEC5", 
+        align="left"
+    )
+)
+
+st.plotly_chart(fig, use_container_width=True)
+st.info(f"✅ 총 {len(df[name_col_name].unique())}개 종목이 그래프에 표시되고 있습니다.")
+
+# 원본 데이터 뷰어
+with st.expander("📊 구글 시트 원본 데이터 펴보기 (종목별 수량증감 상세 조회)"):
+    st.markdown("**💡 구글 시트와 동일한 원본 데이터입니다. 표 안에서 스크롤하거나 우측 상단의 확대 버튼을 누르시면 더 크게 볼 수 있습니다.**")
+    st.dataframe(raw_df, use_container_width=True, hide_index=True)
 
 
 # =====================================================================
@@ -262,6 +255,7 @@ st.markdown("<br><br>", unsafe_allow_html=True)
 color_koact = {'5영업일변화(%p)': '#AEC7E8', '3영업일변화(%p)': '#1F77B4', '당일변화(%p)': '#17BECF'}
 draw_top20_bar_chart(koact_records, "KoAct", color_koact)
 
+
 # =====================================================================
 # 📈 [퀀트 마스터 비서] 내 매입 종목 입체 분석 다이내믹 차트 (전체 수급 합산 모드)
 # =====================================================================
@@ -276,7 +270,7 @@ st.markdown("---")
 st.header("🦅 내 매입 종목 입체 분석 대시보드")
 st.markdown("**💡 1층: 대장 ETF 비중 및 주가 / 2층: 전체 ETF 합산 총 수량증감**")
 
-github_id = "carreras74" # 대표님 ID
+github_id = "carreras74"
 repo_name = "ETF_Auto_Bot"
 base_url = f"https://raw.githubusercontent.com/{github_id}/{repo_name}/main/"
 safe_ledger_name = urllib.parse.quote("매입장부.xlsx")
@@ -295,7 +289,6 @@ try:
             stock_name = my_stocks[i]
             
             with tab:
-                # 1. 내 매수 타점 정보 가져오기
                 buy_date, buy_price = None, None
                 if has_buy_info:
                     row_data = ledger_df[ledger_df['종목명'] == stock_name]
@@ -310,7 +303,6 @@ try:
                                 b_price_val = b_price_val.replace(',', '').replace('원', '').strip()
                             buy_price = float(b_price_val)
 
-                # 2. 대장 ETF 찾기 (비중은 이 대장 ETF를 기준으로 표시합니다)
                 best_etf = None
                 max_weight = -1
                 for etf_name, df in etf_data.items():
@@ -323,9 +315,6 @@ try:
                     st.warning(f"'{stock_name}' 종목은 현재 추적 중인 ETF에 존재하지 않습니다.")
                     continue
                     
-                # =====================================================================
-                # 💡 [핵심 엔진] 모든 ETF를 순회하며 수량 증감을 싹 다 합산(Sum) 합니다!
-                # =====================================================================
                 agg_data = {}
                 
                 for etf_name, df in etf_data.items():
@@ -340,7 +329,6 @@ try:
                         if d not in agg_data:
                             agg_data[d] = {'Weight': 0.0, 'Price': np.nan, 'TotalQtyChange': 0}
                             
-                        # 대장 ETF일 경우에만 1층에 띄울 비중(Weight)을 기록합니다
                         if etf_name == best_etf:
                             w = pd.to_numeric(row[stock_name], errors='coerce')
                             agg_data[d]['Weight'] = w if pd.notna(w) else 0.0
@@ -360,25 +348,20 @@ try:
                         if '🔴▲' in q_str: qty_change = int(q_str.replace('🔴▲', '').replace(',', '').strip())
                         elif '🔵▼' in q_str: qty_change = -int(q_str.replace('🔵▼', '').replace(',', '').strip())
                                 
-                        # 👉 모든 ETF의 수량 증감을 하나의 바구니에 계속 더합니다!
                         agg_data[d]['TotalQtyChange'] += qty_change
 
-                # 딕셔너리를 다시 DataFrame으로 변환 및 날짜순 정렬
                 plot_data = [{'Date': k, 'Weight': v['Weight'], 'Price': v['Price'], 'QtyChange': v['TotalQtyChange']} for k, v in agg_data.items()]
                 p_df = pd.DataFrame(plot_data)
                 
-                # 날짜 정렬을 위한 안전장치
                 p_df['DateObj'] = pd.to_datetime(p_df['Date'], errors='coerce')
                 p_df = p_df.dropna(subset=['DateObj']).sort_values('DateObj')
                 p_df['Date'] = p_df['DateObj'].dt.strftime('%Y-%m-%d')
                 p_df = p_df.drop(columns=['DateObj'])
                 
                 valid_p_df = p_df.dropna(subset=['Price'])
-                # =====================================================================
                 
                 st.subheader(f"📊 {stock_name} 입체 분석 (비중: {best_etf} / 수량: 전체 합산)")
                 
-                # 4. HTS급 2층 차트 렌더링
                 fig = make_subplots(
                     rows=2, cols=1, 
                     shared_xaxes=True,
@@ -389,26 +372,22 @@ try:
                 
                 fig.update_xaxes(type='category')
                 
-                # [1층] 대장 ETF 비중 막대
                 fig.add_trace(
                     go.Bar(x=p_df['Date'], y=p_df['Weight'], name=f'{best_etf} 비중(%)', opacity=0.5, marker_color='#AEC7E8', width=0.35),
                     row=1, col=1, secondary_y=False
                 )
                 
-                # [1층] 주가 꺾은선 
                 fig.add_trace(
                     go.Scatter(x=valid_p_df['Date'], y=valid_p_df['Price'], name='주가(원)', mode='lines+markers', line=dict(color='#333333', width=3), marker=dict(size=6)),
                     row=1, col=1, secondary_y=True
                 )
                 
-                # [2층] 전체 ETF 합산 수량증감 막대 (상승=빨강, 하락=파랑)
                 colors = ['#FF4B4B' if q > 0 else '#1F77B4' if q < 0 else '#CCCCCC' for q in p_df['QtyChange']]
                 fig.add_trace(
                     go.Bar(x=p_df['Date'], y=p_df['QtyChange'], name='전체 ETF 수량 합산', marker_color=colors, width=0.35),
                     row=2, col=1
                 )
                 
-                # [십자선 마법] 내 매수단가 및 일자 표시
                 if not p_df.empty:
                     if buy_price is not None:
                         fig.add_trace(
@@ -465,3 +444,4 @@ except Exception as e:
     st.warning(f"⚠️ 매입장부 데이터를 불러오는 중 에러가 발생했습니다: {e}")
 
 st.markdown("<br><br><br>", unsafe_allow_html=True)
+
