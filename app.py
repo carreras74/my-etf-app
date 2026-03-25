@@ -49,7 +49,7 @@ if not etf_data:
     st.stop()
 
 # =====================================================================
-# 💡 [핵심 패치] 전역 데이터 다이어트 (최근 20영업일 데이터만 유지!)
+# 💡 전역 데이터 다이어트 (최근 20영업일 데이터만 유지!)
 # =====================================================================
 for etf_name, df in etf_data.items():
     if len(df.columns) > 0:
@@ -210,6 +210,10 @@ df['비중'] = pd.to_numeric(df['비중'], errors='coerce')
 df = df.dropna(subset=['비중']).sort_values(by=df.columns[0])
 
 date_col_name, name_col_name, weight_col_name = df.columns[0], '종목명', '비중'
+
+# 💡 [패치 1] X축 날짜를 '월-일' 형식으로 변경 (예: 03-26)
+df[date_col_name] = df[date_col_name].dt.strftime('%m-%d')
+
 df['순위'] = df.groupby(date_col_name)[weight_col_name].rank(method='first', ascending=False)
 
 def split_qty(val): return str(val).split(' | ')[0] if ' | ' in str(val) else str(val)
@@ -223,22 +227,27 @@ def format_price(val):
 df['수량증감(주식수)'] = df['수량증감'].apply(split_qty)
 df['종가/등락률'] = df['수량증감'].apply(format_price)
 
+# 💡 [패치 2] 오른쪽 범례를 '종목명(비중)' 형태로 변경 (% 기호 제거)
+last_weights = df.groupby(name_col_name)[weight_col_name].last()
+df['종목표시명'] = df.apply(lambda r: f"{r[name_col_name]}({last_weights[r[name_col_name]]})", axis=1)
+
 latest_date_val = df[date_col_name].max()
-latest_order = df[df[date_col_name] == latest_date_val].sort_values(by=weight_col_name, ascending=False)[name_col_name].tolist()
+latest_order = df[df[date_col_name] == latest_date_val].sort_values(by=weight_col_name, ascending=False)['종목표시명'].tolist()
 
 st.subheader(f"📅 {selected_etf} 실시간 비중 변동 추이 (최근 20영업일)")
 
 fig = px.line(
-    df, x=date_col_name, y='순위', color=name_col_name, markers=True,
-    hover_name=name_col_name, category_orders={name_col_name: latest_order}, 
-    hover_data={'순위': False, weight_col_name: True, '수량증감': False, '수량증감(주식수)': True, '종가/등락률': True, date_col_name: False, name_col_name: False}
+    df, x=date_col_name, y='순위', color='종목표시명', markers=True,
+    hover_name='종목표시명', category_orders={'종목표시명': latest_order}, 
+    hover_data={'순위': False, weight_col_name: True, '수량증감': False, '수량증감(주식수)': True, '종가/등락률': True, date_col_name: False, '종목표시명': False}
 )
 
 fig.update_layout(
     template="plotly_dark", plot_bgcolor='#121212', paper_bgcolor='#121212',
     yaxis=dict(title="종목 순위 (등수)", autorange="reversed", tickmode="linear", dtick=1, showgrid=False, zeroline=False),
-    xaxis=dict(type="category", title="날짜", showgrid=False), height=800,
-    legend=dict(title="종목명", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02), hovermode="closest",
+    xaxis=dict(type="category", title="날짜 (월-일)", showgrid=False), height=800,
+    # 💡 [패치 3] 맨 위 범례 타이틀을 '종목명(%)'로 변경
+    legend=dict(title="종목명(%)", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02), hovermode="closest",
     hoverlabel=dict(bgcolor="#2A2A2A", font_size=13, font_color="white", bordercolor="#444444", align="left")
 )
 
@@ -374,7 +383,7 @@ if not top20_combined.empty:
                 df_raw = etf_data[e_name].copy()
                 date_col = df_raw.columns[0]
                 df_raw[date_col] = pd.to_datetime(df_raw[date_col])
-                df_raw = df_raw.sort_values(by=date_col).tail(20) # (이미 위에서 잘렸지만 안전을 위해 유지)
+                df_raw = df_raw.sort_values(by=date_col).tail(20) 
                 
                 col_name = f"{s_name}_증감"
                 if col_name in df_raw.columns:
@@ -408,7 +417,6 @@ if not top20_combined.empty:
 st.markdown("---")
 st.header("🦅 내 매입 종목 입체 분석 대시보드")
 
-# 💡 [핵심 패치] 내 매입 종목도 열고 닫을 수 있는 히든 대시보드로 변경
 with st.expander("🦅 [히든 대시보드] 내 매입 종목 정밀 입체 분석 차트 열어보기"):
     try:
         if not ledger_df.empty:
