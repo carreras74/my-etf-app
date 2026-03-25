@@ -421,3 +421,4 @@ except Exception as e:
     st.warning(f"⚠️ 매입장부 데이터를 불러오거나 처리하는 중 에러가 발생했습니다: {e}")
 
 st.markdown("<br><br><br>", unsafe_allow_html=True)
+
