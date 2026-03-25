@@ -259,18 +259,12 @@ draw_top20_bar_chart(koact_records, "KoAct", color_koact)
 # =====================================================================
 # 📈 [퀀트 마스터 비서] 내 매입 종목 입체 분석 다이내믹 차트 (전체 수급 합산 모드)
 # =====================================================================
-import urllib.parse
-import re
-import numpy as np
-import pandas as pd
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-
 st.markdown("---")
 st.header("🦅 내 매입 종목 입체 분석 대시보드")
 st.markdown("**💡 1층: 대장 ETF 비중 및 주가 / 2층: 전체 ETF 합산 총 수량증감**")
 
-github_id = "carreras74"
+# 1. 깃허브에서 내 매입장부 가져오기
+github_id = "carreras74" # 대표님 ID
 repo_name = "ETF_Auto_Bot"
 base_url = f"https://raw.githubusercontent.com/{github_id}/{repo_name}/main/"
 safe_ledger_name = urllib.parse.quote("매입장부.xlsx")
@@ -283,12 +277,14 @@ try:
     has_buy_info = '매수일자' in ledger_df.columns and '매수단가' in ledger_df.columns
     
     if my_stocks and etf_data:
+        # 종목별로 탭(Tab) 만들기
         stock_tabs = st.tabs([f"📈 {name}" for name in my_stocks])
         
         for i, tab in enumerate(stock_tabs):
             stock_name = my_stocks[i]
             
             with tab:
+                # 2. 내 매수 타점 정보 가져오기 (문자열 파싱 처리)
                 buy_date, buy_price = None, None
                 if has_buy_info:
                     row_data = ledger_df[ledger_df['종목명'] == stock_name]
@@ -303,6 +299,7 @@ try:
                                 b_price_val = b_price_val.replace(',', '').replace('원', '').strip()
                             buy_price = float(b_price_val)
 
+                # 3. 대장 ETF 찾기 (비중 표시용 기준점)
                 best_etf = None
                 max_weight = -1
                 for etf_name, df in etf_data.items():
@@ -315,6 +312,9 @@ try:
                     st.warning(f"'{stock_name}' 종목은 현재 추적 중인 ETF에 존재하지 않습니다.")
                     continue
                     
+                # =====================================================================
+                # 💡 [핵심 엔진] 16개 모든 ETF를 순회하며 수량 증감을 싹 다 합산(Sum) 합니다!
+                # =====================================================================
                 agg_data = {}
                 
                 for etf_name, df in etf_data.items():
@@ -329,6 +329,7 @@ try:
                         if d not in agg_data:
                             agg_data[d] = {'Weight': 0.0, 'Price': np.nan, 'TotalQtyChange': 0}
                             
+                        # 대장 ETF일 경우에만 1층에 띄울 비중(Weight)을 기록합니다
                         if etf_name == best_etf:
                             w = pd.to_numeric(row[stock_name], errors='coerce')
                             agg_data[d]['Weight'] = w if pd.notna(w) else 0.0
@@ -342,26 +343,38 @@ try:
                             q_str = parts[0].strip()
                             p_str = parts[1].strip()
                             
+                            # ₩, 콤마 제거 후 주가 추출
                             match = re.search(r'₩([\d,]+)', p_str)
                             if match: agg_data[d]['Price'] = int(match.group(1).replace(',', ''))
                                 
+                        # 기호에 따라 플러스/마이너스 수량 계산
                         if '🔴▲' in q_str: qty_change = int(q_str.replace('🔴▲', '').replace(',', '').strip())
                         elif '🔵▼' in q_str: qty_change = -int(q_str.replace('🔵▼', '').replace(',', '').strip())
                                 
+                        # 👉 모든 ETF의 수량 증감을 하나의 바구니에 계속 누적 합산!
                         agg_data[d]['TotalQtyChange'] += qty_change
 
+                # 데이터를 차트용 DataFrame으로 변환 및 날짜순 정렬
                 plot_data = [{'Date': k, 'Weight': v['Weight'], 'Price': v['Price'], 'QtyChange': v['TotalQtyChange']} for k, v in agg_data.items()]
                 p_df = pd.DataFrame(plot_data)
                 
+                if p_df.empty:
+                    st.info("차트를 그릴 데이터가 없습니다.")
+                    continue
+                
+                # 안전한 날짜 정렬
                 p_df['DateObj'] = pd.to_datetime(p_df['Date'], errors='coerce')
                 p_df = p_df.dropna(subset=['DateObj']).sort_values('DateObj')
                 p_df['Date'] = p_df['DateObj'].dt.strftime('%Y-%m-%d')
                 p_df = p_df.drop(columns=['DateObj'])
                 
+                # 주가가 없는(NaN) 날은 선을 잇기 위해 앞/뒤 데이터로 채움
+                p_df['Price'] = p_df['Price'].ffill().bfill()
                 valid_p_df = p_df.dropna(subset=['Price'])
                 
-                st.subheader(f"📊 {stock_name} 입체 분석 (비중: {best_etf} / 수량: 전체 합산)")
+                st.subheader(f"📊 {stock_name} 입체 분석 (대장 비중: {best_etf} / 수량: 전체 합산)")
                 
+                # 4. HTS급 2층 차트 렌더링
                 fig = make_subplots(
                     rows=2, cols=1, 
                     shared_xaxes=True,
@@ -372,22 +385,26 @@ try:
                 
                 fig.update_xaxes(type='category')
                 
+                # [1층] 대장 ETF 비중 막대
                 fig.add_trace(
                     go.Bar(x=p_df['Date'], y=p_df['Weight'], name=f'{best_etf} 비중(%)', opacity=0.5, marker_color='#AEC7E8', width=0.35),
                     row=1, col=1, secondary_y=False
                 )
                 
+                # [1층] 주가 꺾은선 
                 fig.add_trace(
                     go.Scatter(x=valid_p_df['Date'], y=valid_p_df['Price'], name='주가(원)', mode='lines+markers', line=dict(color='#333333', width=3), marker=dict(size=6)),
                     row=1, col=1, secondary_y=True
                 )
                 
+                # [2층] 전체 ETF 합산 수량증감 막대 (상승=빨강, 하락=파랑)
                 colors = ['#FF4B4B' if q > 0 else '#1F77B4' if q < 0 else '#CCCCCC' for q in p_df['QtyChange']]
                 fig.add_trace(
                     go.Bar(x=p_df['Date'], y=p_df['QtyChange'], name='전체 ETF 수량 합산', marker_color=colors, width=0.35),
                     row=2, col=1
                 )
                 
+                # 💡 [십자선 마법] 내 매수단가 및 일자 초록색 점선 표시
                 if not p_df.empty:
                     if buy_price is not None:
                         fig.add_trace(
@@ -396,7 +413,7 @@ try:
                                 y=[buy_price, buy_price], 
                                 mode="lines+text", 
                                 line=dict(color="#00C853", dash="dash", width=2),
-                                name=f"매수단가 ({buy_price:,.0f}원)",
+                                name=f"내 평단가 ({buy_price:,.0f}원)",
                                 text=[f"내 매수단가 ({buy_price:,.0f}원)", ""],
                                 textposition="bottom right",
                                 showlegend=False,
@@ -416,7 +433,7 @@ try:
                                 y=[min_y - margin, max_y + margin], 
                                 mode="lines+text", 
                                 line=dict(color="#00C853", dash="dash", width=2),
-                                name="매수타점",
+                                name="매수일자",
                                 text=["매수타점", ""],
                                 textposition="top right",
                                 showlegend=False,
@@ -441,7 +458,7 @@ try:
                 st.plotly_chart(fig, use_container_width=True)
 
 except Exception as e:
-    st.warning(f"⚠️ 매입장부 데이터를 불러오는 중 에러가 발생했습니다: {e}")
+    st.warning(f"⚠️ 매입장부 데이터를 불러오거나 처리하는 중 에러가 발생했습니다: {e}")
 
 st.markdown("<br><br><br>", unsafe_allow_html=True)
 
