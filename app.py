@@ -159,18 +159,43 @@ if len(raw_df.columns) > 3:
     # 💡 [핵심 패치] 상위 20위까지만 필터링하여 노이즈 제거!
     df_weight = df_weight[df_weight['순위'] <= 20]
     
-    latest_date = df_weight[date_col].max()
-    # 범례 정렬을 위해 최신 날짜의 TOP 20 순서 추출
-    latest_order = df_weight[df_weight[date_col] == latest_date].sort_values(by='순위')['종목명'].tolist()
+    # ==========================================
+    # 🆕 추가/수정된 로직: 비중 텍스트 및 범례 처리
+    # ==========================================
+    # 1. 점(마커)에 표시할 당일 비중 텍스트 생성 (예: 15.2%)
+    df_weight['비중_텍스트'] = df_weight['비중'].apply(lambda x: f"{x:g}%")
     
-    fig_bump = px.line(df_weight, x='날짜_문자열', y='순위', color='종목명', markers=True, category_orders={'종목명': latest_order})
+    latest_date = df_weight[date_col].max()
+    
+    # 2. 범례에 표시할 '종목명 (최근 비중%)' 매핑 만들기
+    latest_weights = df_weight.sort_values(by=date_col).groupby('종목명').last()['비중']
+    name_to_legend = {name: f"{name} ({weight:g}%)" for name, weight in latest_weights.items()}
+    df_weight['종목명_범례'] = df_weight['종목명'].map(name_to_legend)
+    
+    # 범례 정렬을 위해 최신 날짜의 TOP 20 순서 추출 (새로 만든 범례 이름으로 변환)
+    latest_order = df_weight[df_weight[date_col] == latest_date].sort_values(by='순위')['종목명'].tolist()
+    latest_order_legend = [name_to_legend[name] for name in latest_order]
+    
+    # 3. 차트 그리기
+    fig_bump = px.line(
+        df_weight, 
+        x='날짜_문자열', 
+        y='순위', 
+        color='종목명_범례', 
+        text='비중_텍스트', 
+        markers=True, 
+        category_orders={'종목명_범례': latest_order_legend}
+    )
+    
+    # 마커 위에 텍스트가 겹치지 않게 살짝 위로 올려서 표시
+    fig_bump.update_traces(textposition="top center", textfont=dict(size=11))
     
     fig_bump.update_layout(
         yaxis=dict(title="종목 순위 (1~20위)", autorange="reversed", tickmode="linear", dtick=1, range=[20.5, 0.5]), 
         xaxis=dict(type='category', title="날짜"), 
         template="plotly_dark", 
         height=850,
-        legend=dict(title="종목명 (TOP 20)", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02)
+        legend=dict(title="종목명 (최근 비중)", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02)
     )
     st.plotly_chart(fig_bump, use_container_width=True)
     
