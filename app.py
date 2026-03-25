@@ -24,11 +24,14 @@ def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None, uni
             if m_weight > max_weight:
                 max_weight = m_weight; best_etf = etf_name
                 
-    if not best_etf: return
+    if not best_etf:
+        st.warning(f"'{stock_name}' 종목은 현재 추적 중인 ETF에 존재하지 않습니다.")
+        return
         
     agg_data = {}
     for etf_name, df in etf_data_dict.items():
-        if stock_name not in df.columns: continue
+        if stock_name not in df.columns:
+            continue
             
         date_col = df.columns[0]
         diff_col = f"{stock_name}_증감"
@@ -50,7 +53,7 @@ def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None, uni
                 q_str = parts[0].strip()
                 p_str = parts[1].strip()
                 
-                # 💡 [안전 파싱] 숫자만 추출
+                # 안전 파싱 (숫자만 추출)
                 p_num = re.sub(r'[^\d]', '', p_str)
                 if p_num: agg_data[d]['Price'] = int(p_num)
                     
@@ -65,6 +68,7 @@ def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None, uni
     p_df = pd.DataFrame(plot_data)
     
     if p_df.empty: return
+    
     p_df['DateObj'] = pd.to_datetime(p_df['Date'], errors='coerce')
     p_df = p_df.dropna(subset=['DateObj']).sort_values('DateObj')
     p_df['Date'] = p_df['DateObj'].dt.strftime('%Y-%m-%d')
@@ -73,6 +77,8 @@ def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None, uni
     st.subheader(f"📊 {stock_name} 입체 분석 (대장: {best_etf})")
     
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08, row_heights=[0.7, 0.3], specs=[[{"secondary_y": True}], [{"secondary_y": False}]])
+    
+    # 💡 입체 분석 차트의 X축도 주말을 없애기 위해 'category' 지정
     fig.update_xaxes(type='category')
     
     fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['Weight'], name='비중(%)', opacity=0.5, marker_color='#AEC7E8', width=0.35), row=1, col=1, secondary_y=False)
@@ -82,7 +88,7 @@ def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None, uni
     fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['QtyChange'], name='전체 수량 합산', marker_color=colors, width=0.35), row=2, col=1)
     
     if buy_price:
-        fig.add_trace(go.Scatter(x=[p_df['Date'].iloc[0], p_df['Date'].iloc[-1]], y=[buy_price, buy_price], mode="lines", line=dict(color="#00C853", dash="dash"), name="내 매수단가"), row=1, col=1, secondary_y=True)
+        fig.add_trace(go.Scatter(x=[p_df['Date'].iloc[0], p_df['Date'].iloc[-1]], y=[buy_price, buy_price], mode="lines+text", line=dict(color="#00C853", dash="dash", width=2), name="내 매수단가", text=[f"매수단가 ({buy_price:,.0f}원)", ""], textposition="bottom right", textfont=dict(color='white'), showlegend=False), row=1, col=1, secondary_y=True)
 
     fig.update_layout(height=600, hovermode="x unified", template="plotly_dark", margin=dict(l=10, r=10, t=50, b=10), showlegend=False)
     fig.update_yaxes(title_text="비중 (%)", secondary_y=False, row=1, col=1)
@@ -90,7 +96,7 @@ def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None, uni
     st.plotly_chart(fig, use_container_width=True, key=unique_key or f"chart_{stock_name}")
 
 # =====================================================================
-# 2. 구글 시트 연결 엔진 (중복 헤더 완벽 방어)
+# 2. 구글 시트 데이터 로드 (중복 헤더 방어 패치)
 # =====================================================================
 @st.cache_data(ttl=600)
 def load_data_from_google():
@@ -140,16 +146,31 @@ if etf_data:
         date_col = raw_df.columns[0]
         stock_cols = [c for c in raw_df.columns if c != date_col and not str(c).endswith('_증감')]
         df_weight = raw_df[[date_col] + stock_cols].copy().melt(id_vars=[date_col], var_name='종목명', value_name='비중')
+        
         df_weight[date_col] = pd.to_datetime(df_weight[date_col])
+        # 💡 [핵심 패치 1] 주말을 지우기 위해 날짜를 '달력'이 아닌 '글자(문자열)'로 바꿉니다.
+        df_weight['날짜_문자열'] = df_weight[date_col].dt.strftime('%Y-%m-%d')
+        
         df_weight['비중'] = pd.to_numeric(df_weight['비중'], errors='coerce').fillna(0)
         df_weight['순위'] = df_weight.groupby(date_col)['비중'].rank(method='first', ascending=False)
         
         latest_date = df_weight[date_col].max()
         latest_order = df_weight[df_weight[date_col] == latest_date].sort_values(by='비중', ascending=False)['종목명'].tolist()
         
-        fig = px.line(df_weight, x=date_col, y='순위', color='종목명', markers=True, category_orders={'종목명': latest_order})
-        fig.update_layout(yaxis=dict(autorange="reversed", dtick=1), template="plotly_dark", height=700)
-        st.plotly_chart(fig, use_container_width=True)
+        # X축을 '날짜_문자열'로 지정
+        fig_bump = px.line(df_weight, x='날짜_문자열', y='순위', color='종목명', markers=True, category_orders={'종목명': latest_order})
+        
+        # 💡 [핵심 패치 2] X축 type을 'category'로 강제해서 주말 공백을 완벽히 압축합니다.
+        fig_bump.update_layout(
+            yaxis=dict(title="종목 순위 (등수)", autorange="reversed", tickmode="linear", dtick=1), 
+            xaxis=dict(type='category', title="날짜"), 
+            template="plotly_dark", 
+            height=800
+        )
+        st.plotly_chart(fig_bump, use_container_width=True)
+        
+        with st.expander("📊 구글 시트 원본 데이터 펴보기"):
+            st.dataframe(raw_df, use_container_width=True, hide_index=True)
 
     # --- [섹션 2: 수급 격전지 찐 주도주 분석] ---
     st.divider()
@@ -183,7 +204,6 @@ if etf_data:
                         parts = str(v).split(" | ")
                         q_str, p_str = parts[0].strip(), parts[1].strip()
                         
-                        # 💡 [초강력 파싱] 어떤 기호가 붙어도 숫자만 추출합니다!
                         q_num = re.sub(r'[^\d]', '', q_str)
                         qty = int(q_num) if q_num else 0
                         if any(x in q_str for x in ['🔵', '▼', '-', '하락']): qty = -qty
@@ -211,27 +231,28 @@ if etf_data:
 
     def draw_top20(records, title, color_map):
         if not records:
-            st.warning(f"⚠️ {title} 그룹의 증감 데이터를 파싱할 수 없습니다. (시트를 확인해 주세요)")
+            st.info(f"{title} 데이터가 없습니다.")
             return []
             
         res = pd.DataFrame(records)
         res['절대값'] = res['5d'].abs()
+        res = res[res['절대값'] > 0].sort_values(by='절대값', ascending=False).head(20)
         
-        # 💡 [투명인간 방지 패치] 0원이더라도 상위 20개를 무조건 화면에 띄웁니다!
-        res = res.sort_values(by='절대값', ascending=False).head(20)
+        if res.empty: return []
         
         melted = res.melt(id_vars=['표시명'], value_vars=['5d', '3d', '1d'], var_name='기간', value_name='순매수(백만)')
         
         emo = "🔥" if title=="TIME" else "🌊"
-        fig = px.bar(melted, x='표시명', y='순매수(백만)', color='기간', barmode='group', title=f"{emo} {title} 집중 매수/매도 TOP 20", color_discrete_map=color_map)
-        fig.update_layout(template="plotly_dark", height=600, yaxis_title="금액 (백만)")
+        fig = px.bar(melted, x='표시명', y='순매수(백만)', color='기간', barmode='group', title=f"{emo} [{title} 통합] 5일 집중 매수/매도 격전지 TOP 20", color_discrete_map=color_map)
+        fig.update_layout(template="plotly_dark", height=600, yaxis_title="누적 대금 (단위: 백만원)")
+        fig.update_yaxes(zeroline=True, zerolinewidth=2, zerolinecolor='black')
         st.plotly_chart(fig, use_container_width=True)
         return res['종목명'].tolist()
 
     c_time = {'5d': '#FFBB78', '3d': '#FF7F0E', '1d': '#D62728'}
     t_top20 = draw_top20(make_records(time_agg), "TIME", c_time)
     if t_top20:
-        with st.expander("🔍 [TIME 그룹] 다크모드 입체 분석"):
+        with st.expander("🔍 [TIME 그룹] 다크모드 입체 분석 열기"):
             tabs = st.tabs([f"📈 {n}" for n in t_top20])
             for i, t in enumerate(tabs):
                 with t: draw_hts_chart(t_top20[i], etf_data, unique_key=f"t_{i}")
@@ -239,7 +260,7 @@ if etf_data:
     c_koact = {'5d': '#AEC7E8', '3d': '#1F77B4', '1d': '#17BECF'}
     k_top20 = draw_top20(make_records(koact_agg), "KoAct", c_koact)
     if k_top20:
-        with st.expander("🔍 [KoAct 그룹] 다크모드 입체 분석"):
+        with st.expander("🔍 [KoAct 그룹] 다크모드 입체 분석 열기"):
             tabs = st.tabs([f"📈 {n}" for n in k_top20])
             for i, t in enumerate(tabs):
                 with t: draw_hts_chart(k_top20[i], etf_data, unique_key=f"k_{i}")
@@ -260,6 +281,9 @@ if etf_data:
                     draw_hts_chart(my_s[i], etf_data, buy_price=bp, unique_key=f"my_{i}")
     except:
         st.info("💡 깃허브에서 '매입장부.xlsx'를 찾을 수 없습니다.")
+
+else:
+    st.error("데이터 로드에 실패했습니다. 구글 시트 연결을 확인해 주세요.")
 
 else:
     st.error("데이터 로드 실패")
