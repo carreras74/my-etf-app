@@ -147,36 +147,46 @@ raw_df = etf_data[selected_etf].copy()
 if len(raw_df.columns) > 3:
     date_col = raw_df.columns[0]
     stock_cols = [c for c in raw_df.columns if c != date_col and not str(c).endswith('_증감')]
+    
+    # 1. 데이터 녹이기 (Melt)
     df_weight = raw_df[[date_col] + stock_cols].copy().melt(id_vars=[date_col], var_name='종목명', value_name='비중')
     
-    df_weight[date_col] = pd.to_datetime(df_weight[date_col])
+    # 2. 날짜 형식으로 변환 후 "무조건 오름차순 정렬" (선 꼬임 방지 핵심!!!)
+    df_weight[date_col] = pd.to_datetime(df_weight[date_col], errors='coerce')
+    df_weight = df_weight.dropna(subset=[date_col]) # 날짜가 이상한 행 제거
+    df_weight = df_weight.drop_duplicates(subset=[date_col, '종목명'], keep='last') # 혹시 모를 중복 제거
+    df_weight = df_weight.sort_values(by=date_col) # ★ 시간순 정렬 ★
+    
     df_weight['날짜_문자열'] = df_weight[date_col].dt.strftime('%Y-%m-%d')
-    df_weight['비중'] = pd.to_numeric(df_weight['비중'].astype(str).str.replace('%',''), errors='coerce').fillna(0)
+    
+    # 3. 비중 데이터 클렌징 (콤마, % 제거 후 안전하게 숫자로)
+    df_weight['비중'] = df_weight['비중'].astype(str).str.replace('%', '', regex=False).str.replace(',', '', regex=False)
+    df_weight['비중'] = pd.to_numeric(df_weight['비중'], errors='coerce').fillna(0)
     
     # 순위 계산
     df_weight['순위'] = df_weight.groupby(date_col)['비중'].rank(method='first', ascending=False)
     
-    # 💡 [핵심 패치] 상위 20위까지만 필터링하여 노이즈 제거!
+    # 상위 20위까지만 필터링
     df_weight = df_weight[df_weight['순위'] <= 20]
     
-    # ==========================================
-    # 🆕 추가/수정된 로직: 비중 텍스트 및 범례 처리
-    # ==========================================
-    # 1. 점(마커)에 표시할 당일 비중 텍스트 생성 (예: 15.2%)
-    df_weight['비중_텍스트'] = df_weight['비중'].apply(lambda x: f"{x:g}%")
+    # 4. 비중 텍스트 포맷을 깔끔하게 소수점 2자리까지만 표시 (321% 등 방지)
+    df_weight['비중_텍스트'] = df_weight['비중'].apply(lambda x: f"{x:.2f}%" if x > 0 else "")
     
     latest_date = df_weight[date_col].max()
     
-    # 2. 범례에 표시할 '종목명 (최근 비중%)' 매핑 만들기
+    # 범례 매핑 
     latest_weights = df_weight.sort_values(by=date_col).groupby('종목명').last()['비중']
-    name_to_legend = {name: f"{name} ({weight:g}%)" for name, weight in latest_weights.items()}
+    name_to_legend = {name: f"{name} ({weight:.2f}%)" for name, weight in latest_weights.items()}
     df_weight['종목명_범례'] = df_weight['종목명'].map(name_to_legend)
     
-    # 범례 정렬을 위해 최신 날짜의 TOP 20 순서 추출 (새로 만든 범례 이름으로 변환)
+    # 범례 정렬 (최신 날짜 기준)
     latest_order = df_weight[df_weight[date_col] == latest_date].sort_values(by='순위')['종목명'].tolist()
-    latest_order_legend = [name_to_legend[name] for name in latest_order]
+    latest_order_legend = [name_to_legend[name] for name in latest_order if name in name_to_legend]
     
-    # 3. 차트 그리기
+    # X축 날짜 순서를 명시적으로 지정
+    date_order = df_weight['날짜_문자열'].drop_duplicates().tolist()
+    
+    # 차트 그리기
     fig_bump = px.line(
         df_weight, 
         x='날짜_문자열', 
@@ -184,11 +194,14 @@ if len(raw_df.columns) > 3:
         color='종목명_범례', 
         text='비중_텍스트', 
         markers=True, 
-        category_orders={'종목명_범례': latest_order_legend}
+        category_orders={
+            '종목명_범례': latest_order_legend,
+            '날짜_문자열': date_order  # ★ X축 카테고리 순서를 강제 지정 ★
+        }
     )
     
-    # 마커 위에 텍스트가 겹치지 않게 살짝 위로 올려서 표시
-    fig_bump.update_traces(textposition="top center", textfont=dict(size=11))
+    # 텍스트가 점과 덜 겹치게 위로 올리고, 폰트 크기 조정
+    fig_bump.update_traces(textposition="top center", textfont=dict(size=10))
     
     fig_bump.update_layout(
         yaxis=dict(title="종목 순위 (1~20위)", autorange="reversed", tickmode="linear", dtick=1, range=[20.5, 0.5]), 
