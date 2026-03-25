@@ -50,18 +50,13 @@ if not etf_data:
 
 # =====================================================================
 # 💡 [핵심 패치] 전역 데이터 다이어트 (최근 20영업일 데이터만 유지!)
-# 구글 시트에서 전체 데이터를 불러오자마자, 여기서 최신 20일치만 남깁니다.
-# 이렇게 하면 아래의 모든 차트와 분석 로직이 자동으로 가볍고 빠르게 20일치만 분석합니다.
 # =====================================================================
 for etf_name, df in etf_data.items():
     if len(df.columns) > 0:
         date_col = df.columns[0]
-        # 날짜 형식으로 변환 후 과거부터 최신순으로 정렬
         df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
         df = df.dropna(subset=[date_col]).sort_values(by=date_col)
-        # 최신 20영업일(약 한 달) 데이터만 싹둑 자르기
         df = df.tail(20)
-        # 기존 로직과 충돌하지 않도록 다시 깔끔한 문자열(YYYY-MM-DD)로 되돌려놓기
         df[date_col] = df[date_col].dt.strftime('%Y-%m-%d')
         etf_data[etf_name] = df
 
@@ -413,16 +408,20 @@ if not top20_combined.empty:
 st.markdown("---")
 st.header("🦅 내 매입 종목 입체 분석 대시보드")
 
-try:
-    if not ledger_df.empty:
-        my_stocks = ledger_df['종목명'].dropna().unique().tolist()
-        if my_stocks and etf_data:
-            stock_tabs = st.tabs([f"📈 {name}" for name in my_stocks])
-            for i, tab in enumerate(stock_tabs):
-                with tab: render_stock_3d_chart(my_stocks[i], etf_data, ledger_df, "mystocks")
-    else:
-        st.warning("⚠️ 매입장부(매입장부.xlsx)를 찾을 수 없거나 데이터가 비어 있습니다.")
-except Exception as e:
-    st.warning(f"⚠️ 매입장부 데이터를 처리하는 중 에러가 발생했습니다: {e}")
+# 💡 [핵심 패치] 내 매입 종목도 열고 닫을 수 있는 히든 대시보드로 변경
+with st.expander("🦅 [히든 대시보드] 내 매입 종목 정밀 입체 분석 차트 열어보기"):
+    try:
+        if not ledger_df.empty:
+            my_stocks = ledger_df['종목명'].dropna().unique().tolist()
+            if my_stocks and etf_data:
+                stock_tabs = st.tabs([f"📈 {name}" for name in my_stocks])
+                for i, tab in enumerate(stock_tabs):
+                    with tab: render_stock_3d_chart(my_stocks[i], etf_data, ledger_df, "mystocks")
+            else:
+                st.info("매입장부에 추적할 종목이 없거나 ETF 데이터를 불러오지 못했습니다.")
+        else:
+            st.warning("⚠️ 매입장부(매입장부.xlsx)를 찾을 수 없거나 데이터가 비어 있습니다.")
+    except Exception as e:
+        st.warning(f"⚠️ 매입장부 데이터를 처리하는 중 에러가 발생했습니다: {e}")
 
 st.markdown("<br><br><br>", unsafe_allow_html=True)
