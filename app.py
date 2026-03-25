@@ -64,7 +64,7 @@ def load_ledger_data():
 ledger_df = load_ledger_data()
 
 # =====================================================================
-# 💡 [핵심 패치] 3단 입체 분석 차트 만능 함수 (고유 Key 추가로 에러 원천 차단)
+# 💡 [핵심 패치] 3단 입체 분석 차트 만능 함수 (주가 데이터 저장 로직 복구)
 # =====================================================================
 def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     buy_date, buy_price = None, None
@@ -111,7 +111,10 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
                 parts = diff_str.split(" | ")
                 q_str, p_str = parts[0].strip(), parts[1].strip()
                 match = re.search(r'₩([\d,]+)', p_str)
-                if match: price = int(match.group(1).replace(',', ''))
+                if match: 
+                    price = int(match.group(1).replace(',', ''))
+                    # 💡 여기가 누락되었던 핵심 줄입니다! 찾은 주가를 차트 데이터에 저장합니다.
+                    agg_data[d]['Price'] = price 
                     
                 if '🔴▲' in q_str: qty_change = int(q_str.replace('🔴▲', '').replace(',', '').strip())
                 elif '🔵▼' in q_str: qty_change = -int(q_str.replace('🔵▼', '').replace(',', '').strip())
@@ -138,6 +141,8 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     
     fig.update_xaxes(type='category')
     fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['Weight'], name=f'{best_etf} 비중(%)', opacity=0.3, marker_color='#82B1FF', width=0.35), row=1, col=1, secondary_y=False)
+    
+    # 이제 valid_p_df에 주가가 담겨있으므로 노란색(FFCA28) 주가 선이 정상적으로 그려집니다!
     fig.add_trace(go.Scatter(x=valid_p_df['Date'], y=valid_p_df['Price'], name='주가(원)', mode='lines+markers', line=dict(color='#FFCA28', width=3), marker=dict(size=6, color='#FFCA28')), row=1, col=1, secondary_y=True)
     
     colors = ['#FF5252' if q > 0 else '#448AFF' if q < 0 else '#555555' for q in p_df['QtyChange']]
@@ -164,7 +169,6 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     fig.update_yaxes(title_text="수량증감(주)", row=2, col=1, showgrid=True, gridcolor='#333333', zeroline=True, zerolinecolor='#555555')
     fig.update_yaxes(title_text="매수금액(백만)", row=3, col=1, showgrid=True, gridcolor='#333333', zeroline=True, zerolinecolor='#555555')
     
-    # 💡 [핵심 패치] 여기서 unique_key를 부여하여 중복 렌더링 에러를 원천 차단합니다.
     st.plotly_chart(fig, use_container_width=True, key=f"3d_chart_{unique_key}_{stock_name}")
 
 
@@ -227,7 +231,6 @@ fig.update_layout(
     hoverlabel=dict(bgcolor="#2A2A2A", font_size=13, font_color="white", bordercolor="#444444", align="left")
 )
 
-# 💡 고유 Key 추가
 st.plotly_chart(fig, use_container_width=True, key="main_bump_chart")
 st.info(f"✅ 총 {len(df[name_col_name].unique())}개 종목이 그래프에 표시되고 있습니다.")
 
@@ -312,7 +315,6 @@ def draw_top20_bar_chart(records, category_name, color_map):
     fig.update_yaxes(zeroline=True, zerolinewidth=2, zerolinecolor='#666666', gridcolor='#333333')
     fig.update_traces(textposition='outside', textangle=-90, textfont_size=10, texttemplate='%{text:,.0f}')
     
-    # 💡 고유 Key 추가
     st.plotly_chart(fig, use_container_width=True, key=f"bar_chart_{category_name}")
     return df_res
 
@@ -326,7 +328,6 @@ if not top20_time_df.empty:
         if time_top20_stocks:
             tabs = st.tabs([f"📈 {s}" for s in time_top20_stocks])
             for i, tab in enumerate(tabs):
-                # 💡 "time" 이라는 고유 식별자 전달
                 with tab: render_stock_3d_chart(time_top20_stocks[i], etf_data, ledger_df, "time")
 
 st.markdown("<br><br>", unsafe_allow_html=True)
@@ -341,7 +342,6 @@ if not top20_koact_df.empty:
         if koact_top20_stocks:
             tabs = st.tabs([f"📈 {s}" for s in koact_top20_stocks])
             for i, tab in enumerate(tabs):
-                # 💡 "koact" 이라는 고유 식별자 전달
                 with tab: render_stock_3d_chart(koact_top20_stocks[i], etf_data, ledger_df, "koact")
 
 
@@ -399,7 +399,6 @@ try:
         if my_stocks and etf_data:
             stock_tabs = st.tabs([f"📈 {name}" for name in my_stocks])
             for i, tab in enumerate(stock_tabs):
-                # 💡 "mystocks" 이라는 고유 식별자 전달
                 with tab: render_stock_3d_chart(my_stocks[i], etf_data, ledger_df, "mystocks")
     else:
         st.warning("⚠️ 매입장부(매입장부.xlsx)를 찾을 수 없거나 데이터가 비어 있습니다.")
