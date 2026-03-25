@@ -39,11 +39,11 @@ def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None, uni
         for _, row in df.iterrows():
             d = str(row[date_col]).strip()
             if d not in agg_data:
-                agg_data[d] = {'Weight': 0.0, 'Price': np.nan, 'TotalQtyChange': 0}
+                agg_data[d] = {'Shares': 0.0, 'Price': np.nan, 'TotalQtyChange': 0}
                 
             if etf_name == best_etf:
                 w = pd.to_numeric(row[stock_name], errors='coerce')
-                agg_data[d]['Weight'] = w if pd.notna(w) else 0.0
+                agg_data[d]['Shares'] = w if pd.notna(w) else 0.0
                 
             diff_str = str(row[diff_col]) if diff_col in df.columns else ""
             qty_change = 0
@@ -64,7 +64,7 @@ def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None, uni
                     
             agg_data[d]['TotalQtyChange'] += qty_change
 
-    plot_data = [{'Date': k, 'Weight': v['Weight'], 'Price': v['Price'], 'QtyChange': v['TotalQtyChange']} for k, v in agg_data.items()]
+    plot_data = [{'Date': k, 'Shares': v['Shares'], 'Price': v['Price'], 'QtyChange': v['TotalQtyChange']} for k, v in agg_data.items()]
     p_df = pd.DataFrame(plot_data)
     
     if p_df.empty: return
@@ -80,7 +80,8 @@ def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None, uni
     
     fig.update_xaxes(type='category')
     
-    fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['Weight'], name='비중(%)', opacity=0.5, marker_color='#AEC7E8', width=0.35), row=1, col=1, secondary_y=False)
+    # 💡 데이터 성격에 맞게 '비중'에서 '보유 수량(주)'으로 라벨 수정
+    fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['Shares'], name='보유 수량(주)', opacity=0.5, marker_color='#AEC7E8', width=0.35), row=1, col=1, secondary_y=False)
     fig.add_trace(go.Scatter(x=valid_p_df['Date'], y=valid_p_df['Price'], name='주가(원)', mode='lines+markers', line=dict(color='#FFD700', width=3), marker=dict(size=6)), row=1, col=1, secondary_y=True)
     
     colors = ['#FF4B4B' if q > 0 else '#1F77B4' if q < 0 else '#CCCCCC' for q in p_df['QtyChange']]
@@ -90,7 +91,7 @@ def draw_hts_chart(stock_name, etf_data_dict, buy_price=None, buy_date=None, uni
         fig.add_trace(go.Scatter(x=[p_df['Date'].iloc[0], p_df['Date'].iloc[-1]], y=[buy_price, buy_price], mode="lines+text", line=dict(color="#00C853", dash="dash", width=2), name="내 매수단가", text=[f"매수단가 ({buy_price:,.0f}원)", ""], textposition="bottom right", textfont=dict(color='white'), showlegend=False), row=1, col=1, secondary_y=True)
 
     fig.update_layout(height=600, hovermode="x unified", template="plotly_dark", margin=dict(l=10, r=10, t=50, b=10), showlegend=False)
-    fig.update_yaxes(title_text="비중 (%)", secondary_y=False, row=1, col=1)
+    fig.update_yaxes(title_text="보유 수량 (주)", secondary_y=False, row=1, col=1)
     fig.update_yaxes(title_text="주가 (원)", secondary_y=True, row=1, col=1)
     st.plotly_chart(fig, use_container_width=True, key=unique_key or f"chart_{stock_name}")
 
@@ -148,65 +149,96 @@ if len(raw_df.columns) > 3:
     date_col = raw_df.columns[0]
     stock_cols = [c for c in raw_df.columns if c != date_col and not str(c).endswith('_증감')]
     
-    # 1. 데이터 녹이기 (Melt)
-    df_weight = raw_df[[date_col] + stock_cols].copy().melt(id_vars=[date_col], var_name='종목명', value_name='비중')
-    
-    # 2. 날짜 형식으로 변환 후 "무조건 오름차순 정렬" (선 꼬임 방지 핵심!!!)
-    df_weight[date_col] = pd.to_datetime(df_weight[date_col], errors='coerce')
-    df_weight = df_weight.dropna(subset=[date_col]) # 날짜가 이상한 행 제거
-    df_weight = df_weight.drop_duplicates(subset=[date_col, '종목명'], keep='last') # 혹시 모를 중복 제거
-    df_weight = df_weight.sort_values(by=date_col) # ★ 시간순 정렬 ★
-    
-    df_weight['날짜_문자열'] = df_weight[date_col].dt.strftime('%Y-%m-%d')
-    
-    # 3. 비중 데이터 클렌징 (콤마, % 제거 후 안전하게 숫자로)
-    df_weight['비중'] = df_weight['비중'].astype(str).str.replace('%', '', regex=False).str.replace(',', '', regex=False)
-    df_weight['비중'] = pd.to_numeric(df_weight['비중'], errors='coerce').fillna(0)
-    
-    # 순위 계산
-    df_weight['순위'] = df_weight.groupby(date_col)['비중'].rank(method='first', ascending=False)
-    
+    # 💡 [핵심 패치] 데이터가 '주식수'이므로, 평가금액을 계산하여 진짜 비중을 산출!
+    records = []
+    for _, row in raw_df.iterrows():
+        d = row[date_col]
+        for s in stock_cols:
+            # 1. 주식수 파싱
+            shares_str = str(row[s]).replace(',', '').strip()
+            try:
+                shares = float(shares_str)
+            except ValueError:
+                shares = 0.0
+
+            # 2. 주가 파싱 (_증감 컬럼에서 추출)
+            diff_c = f"{s}_증감"
+            price = np.nan
+            if diff_c in raw_df.columns:
+                diff_str = str(row[diff_c])
+                if " | " in diff_str:
+                    p_str = diff_str.split(" | ")[1].strip()
+                    p_num = re.sub(r'[^\d]', '', p_str)
+                    if p_num: price = float(p_num)
+
+            records.append({'날짜': d, '종목명': s, '주식수': shares, '주가': price})
+
+    df_calc = pd.DataFrame(records)
+
+    # 날짜 정렬 및 결측치 전처리
+    df_calc['날짜'] = pd.to_datetime(df_calc['날짜'], errors='coerce')
+    df_calc = df_calc.dropna(subset=['날짜']).sort_values(by='날짜')
+    df_calc['날짜_문자열'] = df_calc['날짜'].dt.strftime('%Y-%m-%d')
+
+    # 3. 주가가 빈 날은 이전 날짜의 주가로 채우기 (Forward Fill)
+    df_calc['주가'] = df_calc.groupby('종목명')['주가'].ffill().fillna(0)
+
+    # 4. 진짜 '비중(%)' 계산 로직: (해당 종목 평가금액 / 당일 전체 평가금액) * 100
+    df_calc['평가금액'] = df_calc['주식수'] * df_calc['주가']
+    daily_total = df_calc.groupby('날짜')['평가금액'].transform('sum')
+    df_calc['비중'] = np.where(daily_total > 0, (df_calc['평가금액'] / daily_total) * 100, 0.0)
+
+    # 5. 순위 계산 (계산된 '진짜 비중' 기준 정렬)
+    df_calc['순위'] = df_calc.groupby('날짜')['비중'].rank(method='first', ascending=False)
+
     # 상위 20위까지만 필터링
-    df_weight = df_weight[df_weight['순위'] <= 20]
-    
-    # 4. 비중 텍스트 포맷을 깔끔하게 소수점 2자리까지만 표시 (321% 등 방지)
+    df_weight = df_calc[df_calc['순위'] <= 20].copy()
+
+    # 비중 텍스트 포맷 (점 위에 깔끔하게 소수점 2자리까지만 표시)
     df_weight['비중_텍스트'] = df_weight['비중'].apply(lambda x: f"{x:.2f}%" if x > 0 else "")
-    
-    latest_date = df_weight[date_col].max()
-    
-    # 범례 매핑 
-    latest_weights = df_weight.sort_values(by=date_col).groupby('종목명').last()['비중']
+
+    latest_date = df_weight['날짜'].max()
+
+    # 범례 매핑 (가장 최근 진짜 비중 기준)
+    latest_weights = df_weight[df_weight['날짜'] == latest_date].set_index('종목명')['비중']
     name_to_legend = {name: f"{name} ({weight:.2f}%)" for name, weight in latest_weights.items()}
+
+    # 혹시 최근 날짜에 없지만 과거에 TOP 20이었던 종목 범례 처리
+    for name in df_weight['종목명'].unique():
+        if name not in name_to_legend:
+            w = df_weight[df_weight['종목명'] == name].sort_values(by='날짜').iloc[-1]['비중']
+            name_to_legend[name] = f"{name} ({w:.2f}%)"
+
     df_weight['종목명_범례'] = df_weight['종목명'].map(name_to_legend)
-    
-    # 범례 정렬 (최신 날짜 기준)
-    latest_order = df_weight[df_weight[date_col] == latest_date].sort_values(by='순위')['종목명'].tolist()
+
+    # 범례 정렬 (최신 날짜 순위 기준)
+    latest_order = df_weight[df_weight['날짜'] == latest_date].sort_values(by='순위')['종목명'].tolist()
     latest_order_legend = [name_to_legend[name] for name in latest_order if name in name_to_legend]
-    
-    # X축 날짜 순서를 명시적으로 지정
+
+    # X축 날짜 순서 고정 (꼬임 방지)
     date_order = df_weight['날짜_문자열'].drop_duplicates().tolist()
-    
+
     # 차트 그리기
     fig_bump = px.line(
-        df_weight, 
-        x='날짜_문자열', 
-        y='순위', 
-        color='종목명_범례', 
-        text='비중_텍스트', 
-        markers=True, 
+        df_weight,
+        x='날짜_문자열',
+        y='순위',
+        color='종목명_범례',
+        text='비중_텍스트',
+        markers=True,
         category_orders={
             '종목명_범례': latest_order_legend,
-            '날짜_문자열': date_order  # ★ X축 카테고리 순서를 강제 지정 ★
+            '날짜_문자열': date_order
         }
     )
-    
-    # 텍스트가 점과 덜 겹치게 위로 올리고, 폰트 크기 조정
+
+    # 텍스트가 마커를 가리지 않도록 위치 조정
     fig_bump.update_traces(textposition="top center", textfont=dict(size=10))
-    
+
     fig_bump.update_layout(
-        yaxis=dict(title="종목 순위 (1~20위)", autorange="reversed", tickmode="linear", dtick=1, range=[20.5, 0.5]), 
-        xaxis=dict(type='category', title="날짜"), 
-        template="plotly_dark", 
+        yaxis=dict(title="종목 순위 (1~20위)", autorange="reversed", tickmode="linear", dtick=1, range=[20.5, 0.5]),
+        xaxis=dict(type='category', title="날짜"),
+        template="plotly_dark",
         height=850,
         legend=dict(title="종목명 (최근 비중)", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02)
     )
