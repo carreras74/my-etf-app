@@ -64,7 +64,7 @@ def load_ledger_data():
 ledger_df = load_ledger_data()
 
 # =====================================================================
-# 💡 [핵심 패치] 3단 입체 분석 차트 만능 함수 (주가 데이터 저장 로직 복구)
+# 💡 [핵심 패치] 3단 입체 분석 차트 만능 함수 
 # =====================================================================
 def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     buy_date, buy_price = None, None
@@ -113,7 +113,6 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
                 match = re.search(r'₩([\d,]+)', p_str)
                 if match: 
                     price = int(match.group(1).replace(',', ''))
-                    # 💡 여기가 누락되었던 핵심 줄입니다! 찾은 주가를 차트 데이터에 저장합니다.
                     agg_data[d]['Price'] = price 
                     
                 if '🔴▲' in q_str: qty_change = int(q_str.replace('🔴▲', '').replace(',', '').strip())
@@ -142,7 +141,6 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     fig.update_xaxes(type='category')
     fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['Weight'], name=f'{best_etf} 비중(%)', opacity=0.3, marker_color='#82B1FF', width=0.35), row=1, col=1, secondary_y=False)
     
-    # 이제 valid_p_df에 주가가 담겨있으므로 노란색(FFCA28) 주가 선이 정상적으로 그려집니다!
     fig.add_trace(go.Scatter(x=valid_p_df['Date'], y=valid_p_df['Price'], name='주가(원)', mode='lines+markers', line=dict(color='#FFCA28', width=3), marker=dict(size=6, color='#FFCA28')), row=1, col=1, secondary_y=True)
     
     colors = ['#FF5252' if q > 0 else '#448AFF' if q < 0 else '#555555' for q in p_df['QtyChange']]
@@ -233,6 +231,11 @@ fig.update_layout(
 
 st.plotly_chart(fig, use_container_width=True, key="main_bump_chart")
 st.info(f"✅ 총 {len(df[name_col_name].unique())}개 종목이 그래프에 표시되고 있습니다.")
+
+# 💡 [복구 완료] 구글 시트 원본 데이터 펴보기
+with st.expander("📊 구글 시트 원본 데이터 펴보기 (종목별 수량증감 상세 조회)"):
+    st.markdown("**💡 구글 시트와 동일한 원본 데이터입니다. 표 안에서 스크롤하거나 우측 상단의 확대 버튼을 누르시면 더 크게 볼 수 있습니다.**")
+    st.dataframe(raw_df, use_container_width=True, hide_index=True)
 
 
 # =====================================================================
