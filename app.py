@@ -51,14 +51,22 @@ if not etf_data:
     st.stop()
 
 # =====================================================================
-# 💡 [핵심 패치] 데이터 신선도 감지 (Fail-Safe 알림창)
+# 💡 전역 데이터 다이어트 (최근 20영업일 데이터만 유지!)
 # =====================================================================
 kst = pytz.timezone('Asia/Seoul')
 today_kst = datetime.datetime.now(kst).date()
 latest_dates_in_db = []
 
+# 전체 종목 리스트 추출 (섹션 3 검색기를 위해)
+all_stocks_set = set()
+
 for etf_name, df in etf_data.items():
     if len(df.columns) > 0:
+        # 종목명 추출
+        for col in df.columns[1:]:
+            if not str(col).endswith('_증감'):
+                all_stocks_set.add(str(col))
+                
         date_col = df.columns[0]
         df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
         df = df.dropna(subset=[date_col]).sort_values(by=date_col)
@@ -70,6 +78,8 @@ for etf_name, df in etf_data.items():
         df[date_col] = df[date_col].dt.strftime('%Y-%m-%d')
         etf_data[etf_name] = df
 
+all_stocks_list = sorted(list(all_stocks_set))
+
 if latest_dates_in_db:
     overall_latest_date = max(latest_dates_in_db)
     if overall_latest_date < today_kst and today_kst.weekday() < 5:
@@ -78,7 +88,7 @@ if latest_dates_in_db:
         st.success(f"✅ **수집 완료:** 오늘({today_kst.strftime('%m월 %d일')}) 최신 데이터가 성공적으로 반영되어 구동 중입니다!")
 
 
-# 3. 매입장부 데이터 로드
+# 3. 매입장부 데이터 로드 (선생님의 기본 깃허브 세팅)
 @st.cache_data(ttl=600)
 def load_ledger_data():
     try:
@@ -91,7 +101,7 @@ def load_ledger_data():
     except:
         return pd.DataFrame()
 
-ledger_df = load_ledger_data()
+base_ledger_df = load_ledger_data()
 
 # =====================================================================
 # 💡 3단 입체 분석 차트 만능 함수 
@@ -104,7 +114,6 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
         row_data = ledger_df[ledger_df['종목명'] == stock_name]
         if not row_data.empty:
             b_date_val, b_price_val = row_data.iloc[0].get('매수일자'), row_data.iloc[0].get('매수단가')
-            # 💡 [디테일 패치] 매수일자 세로선도 '월-일' 포맷으로 맞춤
             if pd.notna(b_date_val): buy_date = pd.to_datetime(b_date_val).strftime('%m-%d')
             if pd.notna(b_price_val):
                 if isinstance(b_price_val, str): b_price_val = b_price_val.replace(',', '').replace('원', '').strip()
@@ -157,12 +166,9 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     
     p_df['DateObj'] = pd.to_datetime(p_df['Date'], errors='coerce')
     p_df = p_df.dropna(subset=['DateObj']).sort_values('DateObj')
-    # 💡 [디테일 패치] X축 날짜 포맷을 '월-일(MM-DD)'로 간소화
     p_df['Date'] = p_df['DateObj'].dt.strftime('%m-%d')
     p_df = p_df.drop(columns=['DateObj'])
     p_df['Price'] = p_df['Price'].ffill().bfill()
-    
-    # 💡 [디테일 패치] 순매수 금액(AmtChange)을 소수점 없이 깔끔한 정수로 반올림
     p_df['AmtChange'] = p_df['AmtChange'].round(0)
     valid_p_df = p_df.dropna(subset=['Price'])
     
@@ -174,22 +180,18 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     )
     
     fig.update_xaxes(type='category')
-    
-    # 1층
     fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['Weight'], name=f'{best_etf} 비중(%)', opacity=0.3, marker_color='#82B1FF', width=0.35, hovertemplate='%{x}<br>비중: %{y:.2f}%<extra></extra>'), row=1, col=1, secondary_y=False)
     fig.add_trace(go.Scatter(x=valid_p_df['Date'], y=valid_p_df['Price'], name='주가(원)', mode='lines+markers', line=dict(color='#FFCA28', width=3), marker=dict(size=6, color='#FFCA28'), hovertemplate='%{x}<br>주가: %{y:,.0f}원<extra></extra>'), row=1, col=1, secondary_y=True)
     
-    # 2층
     colors = ['#FF5252' if q > 0 else '#448AFF' if q < 0 else '#555555' for q in p_df['QtyChange']]
     fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['QtyChange'], name='수량 증감(주)', marker_color=colors, width=0.4, hovertemplate='%{x}<br>수량: %{y:,.0f}주<extra></extra>'), row=2, col=1)
     
-    # 3층
     text_amt = p_df['AmtChange'].apply(lambda x: f"{x:,.0f}M" if x != 0 else "")
     fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['AmtChange'], name='순매수 금액(백만)', marker_color=colors, width=0.4, text=text_amt, textposition='outside', textfont=dict(color='white', size=10), hovertemplate='%{x}<br>순매수: %{y:,.0f}백만원<extra></extra>'), row=3, col=1)
     
     if not p_df.empty:
         if buy_price is not None:
-            fig.add_trace(go.Scatter(x=[p_df['Date'].iloc[0], p_df['Date'].iloc[-1]], y=[buy_price, buy_price], mode="lines+text", line=dict(color="#00E676", dash="dash", width=2), name=f"내 평단가 ({buy_price:,.0f}원)", text=[f"내 매수단가 ({buy_price:,.0f}원)", ""], textposition="bottom right", showlegend=False, hoverinfo="skip"), row=1, col=1, secondary_y=True)
+            fig.add_trace(go.Scatter(x=[p_df['Date'].iloc[0], p_df['Date'].iloc[-1]], y=[buy_price, buy_price], mode="lines+text", line=dict(color="#00E676", dash="dash", width=2), name=f"내 평단가 ({buy_price:,.0f}원)", text=[f"매수단가 ({buy_price:,.0f}원)", ""], textposition="bottom right", showlegend=False, hoverinfo="skip"), row=1, col=1, secondary_y=True)
         if buy_date is not None and buy_date in p_df['Date'].values:
             max_y, min_y = (valid_p_df['Price'].max(), valid_p_df['Price'].min()) if not valid_p_df.empty else (100000, 0)
             margin = (max_y - min_y) * 0.1 if max_y != min_y else max_y * 0.1
@@ -372,7 +374,7 @@ if not top20_time_df.empty:
         if time_top20_stocks:
             tabs = st.tabs([f"📈 {s}" for s in time_top20_stocks])
             for i, tab in enumerate(tabs):
-                with tab: render_stock_3d_chart(time_top20_stocks[i], etf_data, ledger_df, "time")
+                with tab: render_stock_3d_chart(time_top20_stocks[i], etf_data, base_ledger_df, f"time_{i}")
 
 st.markdown("<br><br>", unsafe_allow_html=True)
 
@@ -386,7 +388,7 @@ if not top20_koact_df.empty:
         if koact_top20_stocks:
             tabs = st.tabs([f"📈 {s}" for s in koact_top20_stocks])
             for i, tab in enumerate(tabs):
-                with tab: render_stock_3d_chart(koact_top20_stocks[i], etf_data, ledger_df, "koact")
+                with tab: render_stock_3d_chart(koact_top20_stocks[i], etf_data, base_ledger_df, f"koact_{i}")
 
 
 # =====================================================================
@@ -432,24 +434,53 @@ if not top20_combined.empty:
 
 
 # =====================================================================
-# 🦅 [섹션 3: 내 매입 종목 입체 분석 대시보드] 
+# 🦅 [섹션 3: 내 매입/관심 종목 입체 분석 대시보드 (공유용 업그레이드!)]
 # =====================================================================
 st.markdown("---")
-st.header("🦅 내 매입 종목 입체 분석 대시보드")
+st.header("🦅 내 관심/매입 종목 정밀 입체 분석 대시보드")
 
-with st.expander("🦅 [히든 대시보드] 내 매입 종목 정밀 입체 분석 차트 열어보기"):
-    try:
-        if not ledger_df.empty:
-            my_stocks = ledger_df['종목명'].dropna().unique().tolist()
-            if my_stocks and etf_data:
-                stock_tabs = st.tabs([f"📈 {name}" for name in my_stocks])
-                for i, tab in enumerate(stock_tabs):
-                    with tab: render_stock_3d_chart(my_stocks[i], etf_data, ledger_df, "mystocks")
-            else:
-                st.info("매입장부에 추적할 종목이 없거나 ETF 데이터를 불러오지 못했습니다.")
-        else:
-            st.warning("⚠️ 매입장부(매입장부.xlsx)를 찾을 수 없거나 데이터가 비어 있습니다.")
-    except Exception as e:
-        st.warning(f"⚠️ 매입장부 데이터를 처리하는 중 에러가 발생했습니다: {e}")
+with st.expander("🦅 [히든 대시보드] 내가 원하는 종목을 골라서 분석 차트 열어보기", expanded=True):
+    st.markdown("💡 **Tip:** 아래 검색창에서 종목을 자유롭게 넣고 빼보세요. 본인의 평단가 선을 보고 싶다면 매입장부 엑셀 파일을 직접 올려도 됩니다!")
+    
+    # 1. 깃허브 기본 장부에서 종목 리스트 뽑기 (선생님 기본 세팅용)
+    default_stocks = base_ledger_df['종목명'].dropna().unique().tolist() if not base_ledger_df.empty else []
+    default_stocks = [s for s in default_stocks if s in all_stocks_list]
+    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        user_selected_stocks = st.multiselect(
+            "🔍 분석하고 싶은 종목을 선택하세요 (여러 개 가능):",
+            options=all_stocks_list,
+            default=default_stocks
+        )
+        
+    with col2:
+        uploaded_ledger = st.file_uploader("📁 (선택) 내 '매입장부.xlsx' 올려서 평단가 적용하기", type=["xlsx"])
+    
+    # 현재 적용할 장부 (업로드 파일이 없으면 기본 깃허브 장부 사용)
+    current_ledger = base_ledger_df
+    
+    if uploaded_ledger is not None:
+        try:
+            current_ledger = pd.read_excel(uploaded_ledger)
+            up_stocks = current_ledger['종목명'].dropna().unique().tolist()
+            # 업로드한 파일에 있는 종목을 자동으로 차트 리스트에 추가 (중복 제외)
+            for s in up_stocks:
+                if s in all_stocks_list and s not in user_selected_stocks:
+                    user_selected_stocks.append(s)
+            st.success("✅ 파일이 정상적으로 적용되었습니다! 차트에 초록색 평단가 선이 표시됩니다.")
+        except Exception as e:
+            st.error(f"엑셀 파일을 읽는 중 오류가 발생했습니다: {e}")
+
+    # 최종 렌더링 리스트 (중복 제거 및 순서 유지)
+    final_render_stocks = list(dict.fromkeys(user_selected_stocks))
+
+    if final_render_stocks:
+        stock_tabs = st.tabs([f"📈 {name}" for name in final_render_stocks])
+        for i, tab in enumerate(stock_tabs):
+            with tab:
+                render_stock_3d_chart(final_render_stocks[i], etf_data, current_ledger, f"user_custom_{i}")
+    else:
+        st.info("👆 위 검색창에서 분석하고 싶은 종목을 선택해 주세요!")
 
 st.markdown("<br><br><br>", unsafe_allow_html=True)
