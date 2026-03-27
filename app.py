@@ -173,7 +173,6 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     
     st.subheader(f"📊 {stock_name} 정밀 분석 (1층: 주가&비중 / 2층: 매수금액&수량)")
     
-    # 💡 [패치 1] 차트를 3층에서 2층으로 통합하고, 두 번째 줄에도 오른쪽 Y축(secondary_y)을 활성화합니다.
     fig = make_subplots(
         rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
         row_heights=[0.6, 0.4], specs=[[{"secondary_y": True}], [{"secondary_y": True}]]
@@ -181,15 +180,12 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     
     fig.update_xaxes(type='category')
     
-    # [1층] 비중과 주가
     fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['Weight'], name=f'{best_etf} 비중(%)', opacity=0.3, marker_color='#82B1FF', width=0.35, hovertemplate='%{x}<br>비중: %{y:.2f}%<extra></extra>'), row=1, col=1, secondary_y=False)
     fig.add_trace(go.Scatter(x=valid_p_df['Date'], y=valid_p_df['Price'], name='주가(원)', mode='lines+markers', line=dict(color='#FFCA28', width=3), marker=dict(size=6, color='#FFCA28'), hovertemplate='%{x}<br>주가: %{y:,.0f}원<extra></extra>'), row=1, col=1, secondary_y=True)
     
     colors = ['#FF5252' if q > 0 else '#448AFF' if q < 0 else '#555555' for q in p_df['QtyChange']]
     text_amt = p_df['AmtChange'].apply(lambda x: f"{x:,.0f}M" if x != 0 else "")
     
-    # 💡 [패치 2] [2층 - 왼쪽 Y축] 순매수 금액 막대 (빨강/파랑 색상 적용)
-    # customdata에 QtyChange(수량) 데이터를 숨겨 넣어서, 마우스를 올렸을 때 한 번에 툴팁으로 보여줍니다.
     fig.add_trace(
         go.Bar(
             x=p_df['Date'], y=p_df['AmtChange'], name='순매수 금액(백만)',
@@ -201,8 +197,6 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
         row=2, col=1, secondary_y=False
     )
     
-    # 💡 [패치 3] [2층 - 오른쪽 Y축] 수량 증감 막대 
-    # offsetgroup을 다르게 설정하여 매수금액 막대 바로 옆에 나란히 서게 만들고, 툴팁(hoverinfo)은 중복방지를 위해 껐습니다.
     fig.add_trace(
         go.Bar(
             x=p_df['Date'], y=p_df['QtyChange'], name='수량 증감(주)',
@@ -220,17 +214,17 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
             margin = (max_y - min_y) * 0.1 if max_y != min_y else max_y * 0.1
             fig.add_trace(go.Scatter(x=[buy_date, buy_date], y=[min_y - margin, max_y + margin], mode="lines+text", line=dict(color="#00E676", dash="dash", width=2), name="매수일자", text=["매수타점", ""], textposition="top right", showlegend=False, hoverinfo="skip"), row=1, col=1, secondary_y=True)
 
+    # 💡 [핵심 패치] font=dict(color="#FFFFFF") 를 추가하여 모든 라벨과 범례를 퓨어 화이트로 강제 고정!
     fig.update_layout(
+        font=dict(color="#FFFFFF"),
         height=750, template="plotly_dark", plot_bgcolor='#121212', paper_bgcolor='#121212',
         hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), margin=dict(l=10, r=10, t=50, b=10),
-        barmode='group' # 막대그래프를 나란히 배치하는 설정
+        barmode='group'
     )
     
     fig.update_xaxes(showgrid=False)
     fig.update_yaxes(title_text="비중 (%)", secondary_y=False, row=1, col=1, showgrid=False, zeroline=False)
     fig.update_yaxes(title_text="주가 (원)", secondary_y=True, row=1, col=1, showgrid=True, gridcolor='#333333', zeroline=False)
-    
-    # 2층 Y축 설정 (왼쪽: 금액, 오른쪽: 수량)
     fig.update_yaxes(title_text="매수금액(백만)", secondary_y=False, row=2, col=1, showgrid=True, gridcolor='#333333', zeroline=True, zerolinecolor='#555555')
     fig.update_yaxes(title_text="수량증감(주)", secondary_y=True, row=2, col=1, showgrid=False, zeroline=True, zerolinecolor='#555555')
     
@@ -292,7 +286,9 @@ fig = px.line(
     hover_data={'순위': False, weight_col_name: True, '수량증감': False, '수량증감(주식수)': True, '종가/등락률': True, date_col_name: False, '종목표시명': False}
 )
 
+# 💡 [핵심 패치] 범프 차트에도 화이트 폰트 적용
 fig.update_layout(
+    font=dict(color="#FFFFFF"),
     template="plotly_dark", plot_bgcolor='#121212', paper_bgcolor='#121212',
     yaxis=dict(title="종목 순위 (등수)", autorange="reversed", tickmode="linear", dtick=1, showgrid=False, zeroline=False),
     xaxis=dict(type="category", title="날짜 (월-일)", showgrid=False), height=800,
@@ -381,7 +377,9 @@ def draw_top20_bar_chart(records, category_name, color_map):
         title=f"🔥 [{category_name}] 5일 누적 순매수 찐 주도주 TOP 20 ({date_str} 기준)", color_discrete_map=color_map
     )
     
+    # 💡 [핵심 패치] 바 차트에도 화이트 폰트 적용
     fig.update_layout(
+        font=dict(color="#FFFFFF"),
         template="plotly_dark", plot_bgcolor='#121212', paper_bgcolor='#121212',
         xaxis_title="", yaxis_title="순매수 금액 (백만원)", height=650, legend_title="매집 기간"
     )
