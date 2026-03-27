@@ -1,3 +1,10 @@
+import os
+# 💡 [핵심 패치 1] 스트림릿이 PC 라이트모드를 따라가지 못하도록, '다크 모드 강제 설정 파일'을 자동으로 생성합니다!
+if not os.path.exists('.streamlit'):
+    os.makedirs('.streamlit')
+with open('.streamlit/config.toml', 'w') as f:
+    f.write('[theme]\nbase="dark"\nprimaryColor="#82B1FF"\nbackgroundColor="#121212"\nsecondaryBackgroundColor="#1E1E1E"\ntextColor="#FFFFFF"\n')
+
 import streamlit as st
 import gspread
 import pandas as pd
@@ -87,7 +94,7 @@ if latest_dates_in_db:
         st.success(f"✅ **수집 완료:** 오늘({today_kst.strftime('%m월 %d일')}) 최신 데이터가 성공적으로 반영되어 구동 중입니다!")
 
 
-# 3. 매입장부 데이터 로드 (선생님의 기본 깃허브 세팅)
+# 3. 매입장부 데이터 로드
 @st.cache_data(ttl=600)
 def load_ledger_data():
     try:
@@ -103,7 +110,7 @@ def load_ledger_data():
 base_ledger_df = load_ledger_data()
 
 # =====================================================================
-# 💡 [핵심 패치] 2단 입체 분석 차트 (좌우 듀얼 Y축 + 통합 툴팁)
+# 💡 2단 입체 분석 차트 (좌우 듀얼 Y축 + 통합 툴팁)
 # =====================================================================
 def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     buy_date, buy_price = None, None
@@ -217,15 +224,15 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     fig.update_layout(
         font=dict(color="#FFFFFF"),
         height=750, template="plotly_dark", plot_bgcolor='#121212', paper_bgcolor='#121212',
-        hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), margin=dict(l=10, r=10, t=50, b=10),
+        hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color="#FFFFFF")), margin=dict(l=10, r=10, t=50, b=10),
         barmode='group'
     )
     
-    fig.update_xaxes(showgrid=False)
-    fig.update_yaxes(title_text="비중 (%)", secondary_y=False, row=1, col=1, showgrid=False, zeroline=False)
-    fig.update_yaxes(title_text="주가 (원)", secondary_y=True, row=1, col=1, showgrid=True, gridcolor='#333333', zeroline=False)
-    fig.update_yaxes(title_text="매수금액(백만)", secondary_y=False, row=2, col=1, showgrid=True, gridcolor='#333333', zeroline=True, zerolinecolor='#555555')
-    fig.update_yaxes(title_text="수량증감(주)", secondary_y=True, row=2, col=1, showgrid=False, zeroline=True, zerolinecolor='#555555')
+    fig.update_xaxes(showgrid=False, color="#FFFFFF")
+    fig.update_yaxes(title_text="비중 (%)", secondary_y=False, row=1, col=1, showgrid=False, zeroline=False, color="#FFFFFF")
+    fig.update_yaxes(title_text="주가 (원)", secondary_y=True, row=1, col=1, showgrid=True, gridcolor='#333333', zeroline=False, color="#FFFFFF")
+    fig.update_yaxes(title_text="매수금액(백만)", secondary_y=False, row=2, col=1, showgrid=True, gridcolor='#333333', zeroline=True, zerolinecolor='#555555', color="#FFFFFF")
+    fig.update_yaxes(title_text="수량증감(주)", secondary_y=True, row=2, col=1, showgrid=False, zeroline=True, zerolinecolor='#555555', color="#FFFFFF")
     
     st.plotly_chart(fig, use_container_width=True, key=f"3d_chart_{unique_key}_{stock_name}")
 
@@ -285,12 +292,18 @@ fig = px.line(
     hover_data={'순위': False, weight_col_name: True, '수량증감': False, '수량증감(주식수)': True, '종가/등락률': True, date_col_name: False, '종목표시명': False}
 )
 
+# 💡 [핵심 패치 2] 범프 차트 오른쪽 종목명(범례) 글씨를 순백색으로 강제 적용하고 크기도 살짝 키웠습니다.
 fig.update_layout(
     font=dict(color="#FFFFFF"),
     template="plotly_dark", plot_bgcolor='#121212', paper_bgcolor='#121212',
-    yaxis=dict(title="종목 순위 (등수)", autorange="reversed", tickmode="linear", dtick=1, showgrid=False, zeroline=False),
-    xaxis=dict(type="category", title="날짜 (월-일)", showgrid=False), height=800,
-    legend=dict(title="종목명(%)", orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02), hovermode="closest",
+    yaxis=dict(title="종목 순위 (등수)", autorange="reversed", tickmode="linear", dtick=1, showgrid=False, zeroline=False, color="#FFFFFF"),
+    xaxis=dict(type="category", title="날짜 (월-일)", showgrid=False, color="#FFFFFF"), height=800,
+    legend=dict(
+        title=dict(text="종목명(%)", font=dict(color="#FFFFFF")), 
+        font=dict(color="#FFFFFF", size=13), # 폰트를 순백색으로 고정!
+        orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02
+    ), 
+    hovermode="closest",
     hoverlabel=dict(bgcolor="#2A2A2A", font_size=13, font_color="white", bordercolor="#444444", align="left")
 )
 
@@ -380,7 +393,8 @@ def draw_top20_bar_chart(records, category_name, color_map):
         template="plotly_dark", plot_bgcolor='#121212', paper_bgcolor='#121212',
         xaxis_title="", yaxis_title="순매수 금액 (백만원)", height=650, legend_title="매집 기간"
     )
-    fig.update_yaxes(zeroline=True, zerolinewidth=2, zerolinecolor='#666666', gridcolor='#333333')
+    fig.update_xaxes(color="#FFFFFF")
+    fig.update_yaxes(zeroline=True, zerolinewidth=2, zerolinecolor='#666666', gridcolor='#333333', color="#FFFFFF")
     fig.update_traces(textposition='outside', textangle=-90, textfont_size=10, texttemplate='%{text:,.0f}')
     
     st.plotly_chart(fig, use_container_width=True, key=f"bar_chart_{category_name}")
@@ -445,7 +459,6 @@ if not top20_combined.empty:
                                 
                         daily_amt = (qty * price) / 1000000.0 if price > 0 else 0.0
                         if qty != 0:
-                            # 💡 [핵심 패치] 순매수액과 당일 종가의 위치를 변경하여 데이터프레임 구조 최적화
                             history_list.append({
                                 '일자': date_str, '운용사(ETF)': e_name.replace('TIME ', 'TIME').replace('KoAct ', 'KoAct'),
                                 '종목명': s_name, '매수/매도 수량': q_str_disp, '순매수액(백만원)': round(daily_amt, 1), '당일 종가': p_str_disp
@@ -453,7 +466,6 @@ if not top20_combined.empty:
                             
         if history_list:
             hist_df = pd.DataFrame(history_list).sort_values(by=['일자', '순매수액(백만원)'], ascending=[False, False])
-            # 💡 [핵심 패치] 표출되는 열(Column) 순서 강제 고정 (일자, 운용사, 종목명, 수량, 순매수액, 당일종가)
             hist_df = hist_df[['일자', '운용사(ETF)', '종목명', '매수/매도 수량', '순매수액(백만원)', '당일 종가']]
             st.dataframe(hist_df, use_container_width=True, hide_index=True)
 
