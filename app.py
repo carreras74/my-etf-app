@@ -214,7 +214,6 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
             margin = (max_y - min_y) * 0.1 if max_y != min_y else max_y * 0.1
             fig.add_trace(go.Scatter(x=[buy_date, buy_date], y=[min_y - margin, max_y + margin], mode="lines+text", line=dict(color="#00E676", dash="dash", width=2), name="매수일자", text=["매수타점", ""], textposition="top right", showlegend=False, hoverinfo="skip"), row=1, col=1, secondary_y=True)
 
-    # 💡 [핵심 패치] font=dict(color="#FFFFFF") 를 추가하여 모든 라벨과 범례를 퓨어 화이트로 강제 고정!
     fig.update_layout(
         font=dict(color="#FFFFFF"),
         height=750, template="plotly_dark", plot_bgcolor='#121212', paper_bgcolor='#121212',
@@ -286,7 +285,6 @@ fig = px.line(
     hover_data={'순위': False, weight_col_name: True, '수량증감': False, '수량증감(주식수)': True, '종가/등락률': True, date_col_name: False, '종목표시명': False}
 )
 
-# 💡 [핵심 패치] 범프 차트에도 화이트 폰트 적용
 fig.update_layout(
     font=dict(color="#FFFFFF"),
     template="plotly_dark", plot_bgcolor='#121212', paper_bgcolor='#121212',
@@ -377,7 +375,6 @@ def draw_top20_bar_chart(records, category_name, color_map):
         title=f"🔥 [{category_name}] 5일 누적 순매수 찐 주도주 TOP 20 ({date_str} 기준)", color_discrete_map=color_map
     )
     
-    # 💡 [핵심 패치] 바 차트에도 화이트 폰트 적용
     fig.update_layout(
         font=dict(color="#FFFFFF"),
         template="plotly_dark", plot_bgcolor='#121212', paper_bgcolor='#121212',
@@ -448,13 +445,16 @@ if not top20_combined.empty:
                                 
                         daily_amt = (qty * price) / 1000000.0 if price > 0 else 0.0
                         if qty != 0:
+                            # 💡 [핵심 패치] 순매수액과 당일 종가의 위치를 변경하여 데이터프레임 구조 최적화
                             history_list.append({
                                 '일자': date_str, '운용사(ETF)': e_name.replace('TIME ', 'TIME').replace('KoAct ', 'KoAct'),
-                                '종목명': s_name, '매수/매도 수량': q_str_disp, '당일 종가': p_str_disp, '순매수액(백만원)': round(daily_amt, 1)
+                                '종목명': s_name, '매수/매도 수량': q_str_disp, '순매수액(백만원)': round(daily_amt, 1), '당일 종가': p_str_disp
                             })
                             
         if history_list:
             hist_df = pd.DataFrame(history_list).sort_values(by=['일자', '순매수액(백만원)'], ascending=[False, False])
+            # 💡 [핵심 패치] 표출되는 열(Column) 순서 강제 고정 (일자, 운용사, 종목명, 수량, 순매수액, 당일종가)
+            hist_df = hist_df[['일자', '운용사(ETF)', '종목명', '매수/매도 수량', '순매수액(백만원)', '당일 종가']]
             st.dataframe(hist_df, use_container_width=True, hide_index=True)
 
 
