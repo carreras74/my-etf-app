@@ -167,7 +167,8 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     p_df['Date'] = p_df['DateObj'].dt.strftime('%m-%d')
     p_df = p_df.drop(columns=['DateObj'])
     p_df['Price'] = p_df['Price'].ffill().bfill()
-    p_df['AmtChange'] = p_df['AmtChange'].round(0)
+    # 💡 [패치] 입체 차트 금액도 소수점 첫째 자리로 설정
+    p_df['AmtChange'] = p_df['AmtChange'].round(1)
     valid_p_df = p_df.dropna(subset=['Price'])
     
     st.subheader(f"📊 {stock_name} 정밀 분석 (1층: 주가&비중 / 2층: 매수금액&수량)")
@@ -182,9 +183,9 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     fig.add_trace(go.Scatter(x=valid_p_df['Date'], y=valid_p_df['Price'], name='주가(원)', mode='lines+markers', line=dict(color='#FFCA28', width=3), marker=dict(size=6, color='#FFCA28'), hovertemplate='%{x}<br>주가: %{y:,.0f}원<extra></extra>'), row=1, col=1, secondary_y=True)
     
     colors = ['#FF5252' if q > 0 else '#448AFF' if q < 0 else '#555555' for q in p_df['QtyChange']]
-    text_amt = p_df['AmtChange'].apply(lambda x: f"{x:,.0f}M" if x != 0 else "")
+    text_amt = p_df['AmtChange'].apply(lambda x: f"{x:,.1f}M" if x != 0 else "")
     
-    fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['AmtChange'], name='순매수 금액(백만)', marker_color=colors, width=0.35, offsetgroup=1, customdata=p_df['QtyChange'], text=text_amt, textposition='outside', textfont=dict(color='white', size=10), hovertemplate='%{x}<br>순매수: %{y:,.0f} 백만원<br>수량: %{customdata:,.0f} 주<extra></extra>'), row=2, col=1, secondary_y=False)
+    fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['AmtChange'], name='순매수 금액(백만)', marker_color=colors, width=0.35, offsetgroup=1, customdata=p_df['QtyChange'], text=text_amt, textposition='outside', textfont=dict(color='white', size=10), hovertemplate='%{x}<br>순매수: %{y:,.1f} 백만원<br>수량: %{customdata:,.0f} 주<extra></extra>'), row=2, col=1, secondary_y=False)
     fig.add_trace(go.Bar(x=p_df['Date'], y=p_df['QtyChange'], name='수량 증감(주)', marker_color=colors, width=0.35, offsetgroup=2, opacity=0.7, hoverinfo='skip'), row=2, col=1, secondary_y=True)
     
     if not p_df.empty:
@@ -267,7 +268,6 @@ st.plotly_chart(fig, use_container_width=True, key="main_bump_chart")
 st.markdown("---")
 st.header("🔥 최근 5영업일 누적 순매수 찐 주도주 TOP 20 (단위: 백만원)")
 
-# 💡 [핵심 패치 1] 운용사별로 데이터를 담을 임시 저장소
 merged_data = {"TIME": [], "KoAct": [], "TIGER": []}
 
 for etf_name, raw_df in etf_data.items():
@@ -320,7 +320,6 @@ for etf_name, raw_df in etf_data.items():
 def draw_merged_top20(category_records, category_name, color_map):
     if not category_records: return pd.DataFrame()
     
-    # 💡 [핵심 패치 2] 같은 운용사 내의 동일 종목명을 하나로 합칩니다(Groupby)
     full_df = pd.DataFrame(category_records)
     grouped = full_df.groupby('종목명').agg({
         '기준일자': 'first',
@@ -329,13 +328,19 @@ def draw_merged_top20(category_records, category_name, color_map):
         '5일매수(백만)': 'sum'
     }).reset_index()
     
-    # 5일 누적 순매수 기준 정렬 및 TOP 20 추출
+    # 💡 [핵심 패치] 모든 수치형 데이터를 소수점 첫째 자리까지 미리 반올림합니다.
+    grouped['5일매수(백만)'] = grouped['5일매수(백만)'].round(1)
+    grouped['3일매수(백만)'] = grouped['3일매수(백만)'].round(1)
+    grouped['당일매수(백만)'] = grouped['당일매수(백만)'].round(1)
+    
     res_df = grouped.sort_values(by='5일매수(백만)', ascending=False).head(20)
     date_str = res_df['기준일자'].iloc[0]
     
     melted = res_df.melt(id_vars=['종목명'], value_vars=['5일매수(백만)', '3일매수(백만)', '당일매수(백만)'], var_name='기간', value_name='순매수금액')
+    
     fig = px.bar(melted, x='종목명', y='순매수금액', color='기간', barmode='group', text='순매수금액', title=f"🔥 [{category_name}] 5일 누적 종목 통합 TOP 20 ({date_str} 기준)", color_discrete_map=color_map)
     fig.update_layout(font=dict(color="#FFFFFF"), template="plotly_dark", plot_bgcolor='#121212', paper_bgcolor='#121212', xaxis_title="", yaxis_title="합산 순매수 금액 (백만원)", height=650)
+    # 💡 [핵심 패치] 텍스트 템플릿에서도 소수점 1자리 고정(.1f)
     fig.update_traces(textposition='outside', textangle=-90, textfont_size=10, texttemplate='%{text:,.1f}')
     st.plotly_chart(fig, use_container_width=True, key=f"bar_{category_name}")
     return res_df
