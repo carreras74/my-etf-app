@@ -102,7 +102,7 @@ def load_ledger_data():
 base_ledger_df = load_ledger_data()
 
 # =====================================================================
-# 💡 2단 입체 분석 차트
+# 💡 2단 입체 분석 차트 함수
 # =====================================================================
 def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     buy_date, buy_price = None, None
@@ -167,7 +167,6 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     p_df['Date'] = p_df['DateObj'].dt.strftime('%m-%d')
     p_df = p_df.drop(columns=['DateObj'])
     p_df['Price'] = p_df['Price'].ffill().bfill()
-    # 💡 [패치] 입체 차트 금액도 소수점 첫째 자리로 설정
     p_df['AmtChange'] = p_df['AmtChange'].round(1)
     valid_p_df = p_df.dropna(subset=['Price'])
     
@@ -261,6 +260,15 @@ fig = px.line(df, x=date_col_name, y='순위', color='종목표시명', markers=
 fig.update_layout(font=dict(color="#FFFFFF"), template="plotly_dark", plot_bgcolor='#121212', paper_bgcolor='#121212', yaxis=dict(title="종목 순위 (등수)", autorange="reversed", tickmode="linear", dtick=1, showgrid=False, zeroline=False, color="#FFFFFF"), xaxis=dict(type="category", title="날짜 (월-일)", showgrid=False, color="#FFFFFF"), height=800, legend=dict(title=dict(text="종목명(%)", font=dict(color="#FFFFFF")), font=dict(color="#FFFFFF", size=13), orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02), hovermode="closest", hoverlabel=dict(bgcolor="#2A2A2A", font_size=13, font_color="white", bordercolor="#444444", align="left"))
 st.plotly_chart(fig, use_container_width=True, key="main_bump_chart")
 
+# =====================================================================
+# 💡 [복구 완료] 선택한 ETF 구글 시트 원본 데이터 테이블
+# =====================================================================
+st.markdown("<br>", unsafe_allow_html=True)
+with st.expander(f"📋 [{selected_etf}] 구글 시트 원본 장부 확인하기", expanded=True):
+    display_df = raw_df.copy()
+    # 최신 날짜가 맨 위로 오도록 정렬하여 출력합니다.
+    st.dataframe(display_df.sort_values(by=display_df.columns[0], ascending=False), use_container_width=True, hide_index=True)
+
 
 # =====================================================================
 # 🔥 [섹션 2: 수급 격전지 찐 주도주 분석]
@@ -270,26 +278,26 @@ st.header("🔥 최근 5영업일 누적 순매수 찐 주도주 TOP 20 (단위:
 
 merged_data = {"TIME": [], "KoAct": [], "TIGER": []}
 
-for etf_name, raw_df in etf_data.items():
+for etf_name, raw_df_loop in etf_data.items():
     if "TIME" in etf_name or "타임" in etf_name: cat = "TIME"
     elif "KoAct" in etf_name or "코액트" in etf_name: cat = "KoAct"
     elif "TIGER" in etf_name or "타이거" in etf_name: cat = "TIGER"
     else: continue
         
-    df = raw_df.copy()
-    if len(df.columns) <= 3: continue 
+    df_loop = raw_df_loop.copy()
+    if len(df_loop.columns) <= 3: continue 
         
-    date_col = df.columns[0]
-    df[date_col] = pd.to_datetime(df[date_col])
-    df = df.sort_values(by=date_col)
+    date_col = df_loop.columns[0]
+    df_loop[date_col] = pd.to_datetime(df_loop[date_col])
+    df_loop = df_loop.sort_values(by=date_col)
     
-    recent_df = df.tail(5)
-    last_1_date = df.iloc[-1][date_col] if len(df) >= 1 else None
-    last_3_dates = df[date_col].tail(3).tolist()
-    last_5_dates = df[date_col].tail(5).tolist()
+    recent_df = df_loop.tail(5)
+    last_1_date = df_loop.iloc[-1][date_col] if len(df_loop) >= 1 else None
+    last_3_dates = df_loop[date_col].tail(3).tolist()
+    last_5_dates = df_loop[date_col].tail(5).tolist()
     latest_date_str = last_1_date.strftime('%Y-%m-%d') if last_1_date else "N/A"
     
-    change_cols = [c for c in df.columns if str(c).endswith('_증감')]
+    change_cols = [c for c in df_loop.columns if str(c).endswith('_증감')]
 
     for col in change_cols:
         stock_name = col.replace('_증감', '')
@@ -328,7 +336,6 @@ def draw_merged_top20(category_records, category_name, color_map):
         '5일매수(백만)': 'sum'
     }).reset_index()
     
-    # 💡 [핵심 패치] 모든 수치형 데이터를 소수점 첫째 자리까지 미리 반올림합니다.
     grouped['5일매수(백만)'] = grouped['5일매수(백만)'].round(1)
     grouped['3일매수(백만)'] = grouped['3일매수(백만)'].round(1)
     grouped['당일매수(백만)'] = grouped['당일매수(백만)'].round(1)
@@ -340,7 +347,6 @@ def draw_merged_top20(category_records, category_name, color_map):
     
     fig = px.bar(melted, x='종목명', y='순매수금액', color='기간', barmode='group', text='순매수금액', title=f"🔥 [{category_name}] 5일 누적 종목 통합 TOP 20 ({date_str} 기준)", color_discrete_map=color_map)
     fig.update_layout(font=dict(color="#FFFFFF"), template="plotly_dark", plot_bgcolor='#121212', paper_bgcolor='#121212', xaxis_title="", yaxis_title="합산 순매수 금액 (백만원)", height=650)
-    # 💡 [핵심 패치] 텍스트 템플릿에서도 소수점 1자리 고정(.1f)
     fig.update_traces(textposition='outside', textangle=-90, textfont_size=10, texttemplate='%{text:,.1f}')
     st.plotly_chart(fig, use_container_width=True, key=f"bar_{category_name}")
     return res_df
