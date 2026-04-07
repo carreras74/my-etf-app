@@ -111,7 +111,6 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     if has_buy_info:
         row_data = ledger_df[ledger_df['종목명'] == stock_name]
         if not row_data.empty:
-            # 💡 [문법 오류 수정 완료] 변수명과 할당을 정상적으로 복구했습니다.
             b_date_val, b_price_val = row_data.iloc[0].get('매수일자'), row_data.iloc[0].get('매수단가')
             if pd.notna(b_date_val): buy_date = pd.to_datetime(b_date_val).strftime('%m-%d')
             if pd.notna(b_price_val):
@@ -302,33 +301,54 @@ def draw_momentum_bump_chart(target_cat, etf_dict):
                         
                     if qty != 0:
                         amt = (qty * price) / 1000000.0
-                        all_records.append({'Date': d_val, 'Stock': stock_name, 'Amt': amt})
+                        # 💡 [업그레이드 1] 마우스 툴팁을 위해 수량(qty) 정보도 함께 바구니에 담습니다.
+                        all_records.append({'Date': d_val, 'Stock': stock_name, 'Amt': amt, 'Qty': qty})
                         
     if not all_records: return
     
     df_amt = pd.DataFrame(all_records)
     df_amt['Date'] = pd.to_datetime(df_amt['Date'])
     
-    daily_sum = df_amt.groupby(['Date', 'Stock'])['Amt'].sum().reset_index()
+    # 💡 [업그레이드 2] 금액(Amt)과 수량(Qty)을 동시에 일자별/종목별로 합산합니다.
+    daily_sum = df_amt.groupby(['Date', 'Stock']).agg({'Amt': 'sum', 'Qty': 'sum'}).reset_index()
     
-    pivot_df = daily_sum.pivot(index='Date', columns='Stock', values='Amt').fillna(0)
-    pivot_df = pivot_df.sort_index()
+    # 금액 피벗 & 5일 롤링
+    pivot_amt = daily_sum.pivot(index='Date', columns='Stock', values='Amt').fillna(0).sort_index()
+    rolling_5d_amt = pivot_amt.rolling(window=5, min_periods=1).sum()
     
-    rolling_5d = pivot_df.rolling(window=5, min_periods=1).sum()
+    # 수량 피벗 & 5일 롤링
+    pivot_qty = daily_sum.pivot(index='Date', columns='Stock', values='Qty').fillna(0).sort_index()
+    rolling_5d_qty = pivot_qty.rolling(window=5, min_periods=1).sum()
     
+    # 명예의 전당 추출
     target_universe = set()
-    for date in rolling_5d.index:
-        daily_top20 = rolling_5d.loc[date].nlargest(20).index.tolist()
+    for date in rolling_5d_amt.index:
+        daily_top20 = rolling_5d_amt.loc[date].nlargest(20).index.tolist()
         target_universe.update(daily_top20)
         
     if not target_universe: return
     
-    universe_df = rolling_5d[list(target_universe)]
-    long_df = universe_df.reset_index().melt(id_vars='Date', var_name='Stock', value_name='Rolling_5d_Amount')
+    # 금액 데이터 Melt
+    universe_amt = rolling_5d_amt[list(target_universe)].reset_index().melt(id_vars='Date', var_name='Stock', value_name='Rolling_5d_Amount')
+    # 수량 데이터 Melt
+    universe_qty = rolling_5d_qty[list(target_universe)].reset_index().melt(id_vars='Date', var_name='Stock', value_name='Rolling_5d_Qty')
     
-    long_df['Rank'] = long_df.groupby('Date')['Rolling_5d_Amount'].rank(method='min', ascending=False)
+    # 금액과 수량 데이터를 하나로 합치기
+    long_df = pd.merge(universe_amt, universe_qty, on=['Date', 'Stock'])
+    
+    # 💡 [업그레이드 3: 공백 메우기] method='first'를 사용하여 금액이 0으로 똑같더라도 공동 순위 대신 25, 26, 27등으로 강제 분산시킵니다.
+    long_df['Rank'] = long_df.groupby('Date')['Rolling_5d_Amount'].rank(method='first', ascending=False)
     long_df['Date_str'] = long_df['Date'].dt.strftime('%m-%d')
     long_df = long_df.sort_values(['Date', 'Rank'])
+    
+    # 💡 [업그레이드 4: 수량 텍스트 포맷팅] 빨강/파랑 화살표 기호를 입혀줍니다.
+    def format_qty_str(qty):
+        if pd.isna(qty) or qty == 0: return "0"
+        if qty > 0: return f"🔴▲ {int(qty):,}"
+        else: return f"🔵▼ {abs(int(qty)):,}"
+        
+    long_df['수량(5일 누적)'] = long_df['Rolling_5d_Qty'].apply(format_qty_str)
+    long_df = long_df.rename(columns={'Rolling_5d_Amount': '순매수(백만)'}) # 툴팁에 예쁘게 보이게 이름 변경
     
     fig = px.line(
         long_df, 
@@ -336,11 +356,18 @@ def draw_momentum_bump_chart(target_cat, etf_dict):
         y='Rank', 
         color='Stock', 
         markers=True,
-        hover_data={'Rolling_5d_Amount': ':,.1f', 'Rank': True, 'Date_str': False},
+        # 💡 [업그레이드 5] 마우스를 올리면 순매수(금액)과 수량(빨강/파랑)이 동시에 보이도록 세팅합니다.
+        hover_data={
+            'Rank': True,
+            '순매수(백만)': ':,.1f',
+            '수량(5일 누적)': True, 
+            'Date_str': False
+        },
         title=f"🏆 [{target_cat}] 찐 주도주 20일 수급 로테이션 (최근 5일 누적 순매수액 기준)"
     )
     
-    fig.update_yaxes(autorange="reversed", tickmode='linear', tick0=1, dtick=1, title="순위 (합산 금액 기준)")
+    # dtick=1을 제거하여, 종목이 많을 때 Y축 숫자가 너무 빽빽하게 겹치지 않고 자동으로 조절되게 만듭니다.
+    fig.update_yaxes(autorange="reversed", title="순위 (합산 금액 기준)")
     fig.update_xaxes(title="날짜 (월-일)", type='category')
     fig.update_traces(line=dict(width=3), marker=dict(size=8))
     fig.update_layout(
