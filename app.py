@@ -111,7 +111,8 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
     if has_buy_info:
         row_data = ledger_df[ledger_df['종목명'] == stock_name]
         if not row_data.empty:
-            b_date_val, row_data.iloc[0].get('매수일자'), b_price_val = row_data.iloc[0].get('매수일자'), row_data.iloc[0].get('매수일자'), row_data.iloc[0].get('매수단가')
+            # 💡 [문법 오류 수정 완료] 변수명과 할당을 정상적으로 복구했습니다.
+            b_date_val, b_price_val = row_data.iloc[0].get('매수일자'), row_data.iloc[0].get('매수단가')
             if pd.notna(b_date_val): buy_date = pd.to_datetime(b_date_val).strftime('%m-%d')
             if pd.notna(b_price_val):
                 if isinstance(b_price_val, str): b_price_val = b_price_val.replace(',', '').replace('원', '').strip()
@@ -392,7 +393,6 @@ for etf_name, raw_df_loop in etf_data.items():
                 if '🔴▲' in q_str: qty = int(q_str.replace('🔴▲', '').replace(',', '').strip())
                 elif '🔵▼' in q_str: qty = -int(q_str.replace('🔵▼', '').replace(',', '').strip())
                 
-                # 💡 [핵심 패치 완료] p_s 오타를 p_str 로 정상 수정했습니다.
                 match = re.search(r'₩([\d,]+)', p_str)
                 if match: price = int(match.group(1).replace(',', ''))
 
