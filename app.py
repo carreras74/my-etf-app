@@ -64,8 +64,16 @@ today_kst = datetime.datetime.now(kst).date()
 latest_dates_in_db = []
 all_stocks_set = set()
 
+# 💡 구글 시트에서 데이터를 읽어올 때 TIGER가 남아있더라도 무시하도록 필터링
+filtered_etf_data = {}
 for etf_name, df in etf_data.items():
-    if "수량백업" in etf_name: continue
+    if "수량백업" in etf_name or "TIGER" in etf_name or "타이거" in etf_name: 
+        continue
+    filtered_etf_data[etf_name] = df
+
+etf_data = filtered_etf_data
+
+for etf_name, df in etf_data.items():
     if len(df.columns) > 0:
         for col in df.columns[1:]:
             if not str(col).endswith('_증감'):
@@ -78,7 +86,6 @@ for etf_name, df in etf_data.items():
         if not df.empty:
             latest_dates_in_db.append(df[date_col].max().date())
             
-        # 💡 [핵심 패치 1] 분석 범위를 15일로 압축하여 가독성을 높입니다.
         df = df.tail(15)
         df[date_col] = df[date_col].dt.strftime('%Y-%m-%d')
         etf_data[etf_name] = df
@@ -124,7 +131,6 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
 
     best_etf, max_weight = None, -1
     for etf_name, df in etf_data.items():
-        if "수량백업" in etf_name: continue
         if stock_name in df.columns:
             m_weight = pd.to_numeric(df[stock_name], errors='coerce').max()
             if m_weight > max_weight: max_weight, best_etf = m_weight, etf_name
@@ -135,7 +141,6 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
         
     agg_data = {}
     for etf_name, df in etf_data.items():
-        if "수량백업" in etf_name: continue
         if stock_name not in df.columns: continue
             
         date_col, diff_col = df.columns[0], f"{stock_name}_증감"
@@ -219,7 +224,11 @@ def render_stock_3d_chart(stock_name, etf_data, ledger_df, unique_key):
 # =====================================================================
 # 🏁 [섹션 1: 범프 차트 - 종목별 순위 변동]
 # =====================================================================
-valid_etfs = [k for k in etf_data.keys() if "수량백업" not in k]
+valid_etfs = list(etf_data.keys())
+if not valid_etfs:
+    st.warning("분석할 ETF 데이터가 없습니다. 구글 시트를 확인해 주세요.")
+    st.stop()
+    
 selected_etf = st.sidebar.selectbox("ETF 선택", valid_etfs)
 st.sidebar.markdown("<br>" * 15, unsafe_allow_html=True)
 
@@ -284,7 +293,6 @@ def draw_momentum_bump_chart(target_cat, etf_dict, backup_df):
     
     latest_prices = {}
     for etf_name, df_raw in etf_dict.items():
-        if "수량백업" in etf_name: continue
         if target_cat == "TIME" and not ("TIME" in etf_name or "타임" in etf_name): continue
         if target_cat == "KoAct" and not ("KoAct" in etf_name or "코액트" in etf_name): continue
         if len(df_raw) == 0: continue
@@ -316,7 +324,6 @@ def draw_momentum_bump_chart(target_cat, etf_dict, backup_df):
 
     all_records = []
     for etf_name, df_raw in etf_dict.items():
-        if "수량백업" in etf_name: continue
         if target_cat == "TIME" and ("TIME" in etf_name or "타임" in etf_name): pass
         elif target_cat == "KoAct" and ("KoAct" in etf_name or "코액트" in etf_name): pass
         else: continue
@@ -357,7 +364,6 @@ def draw_momentum_bump_chart(target_cat, etf_dict, backup_df):
     pivot_qty = daily_sum.pivot(index='Date', columns='Stock', values='Qty').fillna(0).sort_index()
     rolling_5d_qty = pivot_qty.rolling(window=5, min_periods=1).sum()
     
-    # 💡 [핵심 패치 2] Top 10 집중 추적
     target_universe = set()
     for date in rolling_5d_amt.index:
         daily_top10 = rolling_5d_amt.loc[date].nlargest(10).index.tolist()
@@ -421,13 +427,11 @@ def draw_momentum_bump_chart(target_cat, etf_dict, backup_df):
 st.markdown("---")
 st.header("🔥 최근 5영업일 누적 순매수 찐 주도주 TOP 20 (단위: 백만원)")
 
-merged_data = {"TIME": [], "KoAct": [], "TIGER": []}
+merged_data = {"TIME": [], "KoAct": []}
 
 for etf_name, raw_df_loop in etf_data.items():
-    if "수량백업" in etf_name: continue
     if "TIME" in etf_name or "타임" in etf_name: cat = "TIME"
     elif "KoAct" in etf_name or "코액트" in etf_name: cat = "KoAct"
-    elif "TIGER" in etf_name or "타이거" in etf_name: cat = "TIGER"
     else: continue
         
     df_loop = raw_df_loop.copy()
@@ -518,29 +522,17 @@ if not t20_koact.empty:
             with tab: render_stock_3d_chart(stocks[i], etf_data, base_ledger_df, f"k_{i}")
     draw_momentum_bump_chart("KoAct", etf_data, qty_backup_df)
 
-st.markdown("<br><hr><br>", unsafe_allow_html=True)
-
-
-# 💡 TIGER (초록) 렌더링
-t20_tiger = draw_merged_top20(merged_data["TIGER"], "TIGER", {'5일매수(백만)': '#C5E1A5', '3일매수(백만)': '#8BC34A', '당일매수(백만)': '#33691E'})
-if not t20_tiger.empty:
-    with st.expander("🦅 [히든 대시보드] TIGER 통합 TOP 20 입체 분석"):
-        stocks = t20_tiger['종목명'].tolist()
-        tabs = st.tabs([f"📈 {s}" for s in stocks])
-        for i, tab in enumerate(tabs):
-            with tab: render_stock_3d_chart(stocks[i], etf_data, base_ledger_df, f"tg_{i}")
 
 # =====================================================================
 # 🕵️‍♂️ [섹션 2-1: 상세 거래 장부]
 # =====================================================================
 st.markdown("---")
 with st.expander("🔍 [히든 데이터베이스] TOP 20 종목들의 개별 ETF 거래 장부 (어느 ETF가 샀나?)"):
-    top20_all = pd.concat([t20_time, t20_koact, t20_tiger])['종목명'].unique()
+    top20_all = pd.concat([t20_time, t20_koact])['종목명'].unique()
     h_list = []
     for etf_name, df_raw in etf_data.items():
-        if "수량백업" in etf_name: continue
         d_col = df_raw.columns[0]
-        df_proc = df_raw # 이미 15일치임
+        df_proc = df_raw 
         for s_name in top20_all:
             c_col = f"{s_name}_증감"
             if c_col in df_proc.columns:
