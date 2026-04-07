@@ -266,8 +266,96 @@ st.plotly_chart(fig, use_container_width=True, key="main_bump_chart")
 st.markdown("<br>", unsafe_allow_html=True)
 with st.expander(f"📋 [{selected_etf}] 구글 시트 원본 장부 확인하기", expanded=True):
     display_df = raw_df.copy()
-    # 최신 날짜가 맨 위로 오도록 정렬하여 출력합니다.
     st.dataframe(display_df.sort_values(by=display_df.columns[0], ascending=False), use_container_width=True, hide_index=True)
+
+
+# =====================================================================
+# 🔥 [추가 기능] 20일 누적 수급 로테이션 범프 차트 그리기 엔진
+# =====================================================================
+def draw_momentum_bump_chart(target_cat, etf_dict):
+    all_records = []
+    for etf_name, df_raw in etf_dict.items():
+        # 지정된 브랜드(TIME 또는 KoAct)만 필터링
+        if target_cat == "TIME" and ("TIME" in etf_name or "타임" in etf_name): pass
+        elif target_cat == "KoAct" and ("KoAct" in etf_name or "코액트" in etf_name): pass
+        else: continue
+            
+        if len(df_raw.columns) <= 3: continue
+        date_col = df_raw.columns[0]
+        change_cols = [c for c in df_raw.columns if str(c).endswith('_증감')]
+        
+        for _, r in df_raw.iterrows():
+            d_val = r[date_col]
+            for col in change_cols:
+                stock_name = col.replace('_증감', '')
+                v = r[col]
+                if isinstance(v, str) and " | " in v:
+                    qty, price = 0, 0
+                    parts = v.split(" | ")
+                    q_s, p_s = parts[0].strip(), parts[1].strip()
+                    
+                    if '🔴▲' in q_s: qty = int(q_s.replace('🔴▲', '').replace(',', '').strip())
+                    elif '🔵▼' in q_s: qty = -int(q_s.replace('🔵▼', '').replace(',', '').strip())
+                    
+                    match = re.search(r'₩([\d,]+)', p_s)
+                    if match: price = int(match.group(1).replace(',', ''))
+                        
+                    if qty != 0:
+                        amt = (qty * price) / 1000000.0
+                        all_records.append({'Date': d_val, 'Stock': stock_name, 'Amt': amt})
+                        
+    if not all_records: return
+    
+    df_amt = pd.DataFrame(all_records)
+    df_amt['Date'] = pd.to_datetime(df_amt['Date'])
+    
+    # 운용사 전체의 일자별/종목별 순매수 합산
+    daily_sum = df_amt.groupby(['Date', 'Stock'])['Amt'].sum().reset_index()
+    
+    # 5일 누적 계산을 위한 피벗 테이블 생성
+    pivot_df = daily_sum.pivot(index='Date', columns='Stock', values='Amt').fillna(0)
+    pivot_df = pivot_df.sort_index()
+    
+    # 💡 5일 롤링 윈도우 (최근 5일치 합산 금액을 매일매일 계산)
+    rolling_5d = pivot_df.rolling(window=5, min_periods=1).sum()
+    
+    # 명예의 전당: 20일 동안 단 한 번이라도 당일 기준 '5일 합산 TOP 20'에 들었던 종목 추출
+    target_universe = set()
+    for date in rolling_5d.index:
+        daily_top20 = rolling_5d.loc[date].nlargest(20).index.tolist()
+        target_universe.update(daily_top20)
+        
+    if not target_universe: return
+    
+    # 해당 종목들만 추려내어 다시 길게 변환(Melt)
+    universe_df = rolling_5d[list(target_universe)]
+    long_df = universe_df.reset_index().melt(id_vars='Date', var_name='Stock', value_name='Rolling_5d_Amount')
+    
+    # 매일매일의 누적 순매수액 기준으로 순위 매기기
+    long_df['Rank'] = long_df.groupby('Date')['Rolling_5d_Amount'].rank(method='min', ascending=False)
+    long_df['Date_str'] = long_df['Date'].dt.strftime('%m-%d')
+    long_df = long_df.sort_values(['Date', 'Rank'])
+    
+    # 시각화 (범프 차트)
+    fig = px.line(
+        long_df, 
+        x='Date_str', 
+        y='Rank', 
+        color='Stock', 
+        markers=True,
+        hover_data={'Rolling_5d_Amount': ':,.1f', 'Rank': True, 'Date_str': False},
+        title=f"🏆 [{target_cat}] 찐 주도주 20일 수급 로테이션 (최근 5일 누적 순매수액 기준)"
+    )
+    
+    fig.update_yaxes(autorange="reversed", tickmode='linear', tick0=1, dtick=1, title="순위 (합산 금액 기준)")
+    fig.update_xaxes(title="날짜 (월-일)", type='category')
+    fig.update_traces(line=dict(width=3), marker=dict(size=8))
+    fig.update_layout(
+        font=dict(color="#FFFFFF"), template="plotly_dark", plot_bgcolor='#121212', paper_bgcolor='#121212',
+        height=650, hovermode="x unified", legend_title_text='주도주 라인업'
+    )
+    
+    st.plotly_chart(fig, use_container_width=True, key=f"momentum_bump_{target_cat}")
 
 
 # =====================================================================
@@ -311,7 +399,7 @@ for etf_name, raw_df_loop in etf_data.items():
                 q_str, p_str = parts[0].strip(), parts[1].strip()
                 if '🔴▲' in q_str: qty = int(q_str.replace('🔴▲', '').replace(',', '').strip())
                 elif '🔵▼' in q_str: qty = -int(q_str.replace('🔵▼', '').replace(',', '').strip())
-                match = re.search(r'₩([\d,]+)', p_str)
+                match = re.search(r'₩([\d,]+)', p_s)
                 if match: price = int(match.group(1).replace(',', ''))
 
             daily_amt = (qty * price) / 1000000.0
@@ -351,7 +439,8 @@ def draw_merged_top20(category_records, category_name, color_map):
     st.plotly_chart(fig, use_container_width=True, key=f"bar_{category_name}")
     return res_df
 
-# TIME (주황) / KoAct (파랑) / TIGER (초록) 차트 출력
+
+# 💡 TIME (주황) 렌더링 -> 바로 아래에 범프 차트 출력
 t20_time = draw_merged_top20(merged_data["TIME"], "TIME", {'5일매수(백만)': '#FFBB78', '3일매수(백만)': '#FF7F0E', '당일매수(백만)': '#D62728'})
 if not t20_time.empty:
     with st.expander("🦅 [히든 대시보드] TIME 통합 TOP 20 입체 분석"):
@@ -359,8 +448,14 @@ if not t20_time.empty:
         tabs = st.tabs([f"📈 {s}" for s in stocks])
         for i, tab in enumerate(tabs):
             with tab: render_stock_3d_chart(stocks[i], etf_data, base_ledger_df, f"t_{i}")
+    
+    # 👉 선생님께서 원하신 핵심 위치! TIME 막대그래프 바로 아래에 TIME 20일 추적 범프 차트가 들어갑니다.
+    draw_momentum_bump_chart("TIME", etf_data)
 
-st.markdown("<br>", unsafe_allow_html=True)
+st.markdown("<br><hr><br>", unsafe_allow_html=True)
+
+
+# 💡 KoAct (파랑) 렌더링 -> 바로 아래에 범프 차트 출력
 t20_koact = draw_merged_top20(merged_data["KoAct"], "KoAct", {'5일매수(백만)': '#AEC7E8', '3일매수(백만)': '#1F77B4', '당일매수(백만)': '#17BECF'})
 if not t20_koact.empty:
     with st.expander("🦅 [히든 대시보드] KoAct 통합 TOP 20 입체 분석"):
@@ -368,8 +463,14 @@ if not t20_koact.empty:
         tabs = st.tabs([f"📈 {s}" for s in stocks])
         for i, tab in enumerate(tabs):
             with tab: render_stock_3d_chart(stocks[i], etf_data, base_ledger_df, f"k_{i}")
+            
+    # 👉 KoAct 막대그래프 바로 아래에 KoAct 20일 추적 범프 차트가 들어갑니다.
+    draw_momentum_bump_chart("KoAct", etf_data)
 
-st.markdown("<br>", unsafe_allow_html=True)
+st.markdown("<br><hr><br>", unsafe_allow_html=True)
+
+
+# 💡 TIGER (초록) 렌더링 (TIGER는 선생님 요청대로 범프 차트 분석에서 제외하고 기존 막대그래프만 보여줍니다)
 t20_tiger = draw_merged_top20(merged_data["TIGER"], "TIGER", {'5일매수(백만)': '#C5E1A5', '3일매수(백만)': '#8BC34A', '당일매수(백만)': '#33691E'})
 if not t20_tiger.empty:
     with st.expander("🦅 [히든 대시보드] TIGER 통합 TOP 20 입체 분석"):
