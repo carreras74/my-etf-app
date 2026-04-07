@@ -316,7 +316,6 @@ def draw_momentum_bump_chart(target_cat, etf_dict):
     pivot_qty = daily_sum.pivot(index='Date', columns='Stock', values='Qty').fillna(0).sort_index()
     rolling_5d_qty = pivot_qty.rolling(window=5, min_periods=1).sum()
     
-    # 💡 [핵심 패치 1] Top 20에서 Top 10으로 압축하여 가독성을 극대화합니다!
     target_universe = set()
     for date in rolling_5d_amt.index:
         daily_top10 = rolling_5d_amt.loc[date].nlargest(10).index.tolist()
@@ -341,12 +340,17 @@ def draw_momentum_bump_chart(target_cat, etf_dict):
     long_df['수량(5일 누적)'] = long_df['Rolling_5d_Qty'].apply(format_qty_str)
     long_df = long_df.rename(columns={'Rolling_5d_Amount': '순매수(백만)'})
     
+    # 💡 [핵심 패치] 범례 순서를 가장 마지막 날짜(오늘)의 1등부터 순서대로 정렬합니다.
+    latest_date_val = long_df['Date'].max()
+    latest_order = long_df[long_df['Date'] == latest_date_val].sort_values(by='Rank')['Stock'].tolist()
+    
     fig = px.line(
         long_df, 
         x='Date_str', 
         y='Rank', 
         color='Stock', 
         markers=True,
+        category_orders={'Stock': latest_order}, # 💡 정렬 기준 투입!
         hover_data={
             'Rank': True,
             '순매수(백만)': ':,.1f',
@@ -359,8 +363,6 @@ def draw_momentum_bump_chart(target_cat, etf_dict):
     fig.update_yaxes(autorange="reversed", title="순위 (합산 금액 기준)")
     fig.update_xaxes(title="날짜 (월-일)", type='category')
     fig.update_traces(line=dict(width=3), marker=dict(size=8))
-    
-    # 💡 [핵심 패치 2] hovermode="closest" 로 변경하여 마우스가 위치한 단 1개의 점(종목)만 깔끔하게 보여줍니다!
     fig.update_layout(
         font=dict(color="#FFFFFF"), template="plotly_dark", plot_bgcolor='#121212', paper_bgcolor='#121212',
         height=650, hovermode="closest", legend_title_text='주도주 라인업'
