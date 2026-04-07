@@ -301,7 +301,6 @@ def draw_momentum_bump_chart(target_cat, etf_dict):
                         
                     if qty != 0:
                         amt = (qty * price) / 1000000.0
-                        # 💡 [업그레이드 1] 마우스 툴팁을 위해 수량(qty) 정보도 함께 바구니에 담습니다.
                         all_records.append({'Date': d_val, 'Stock': stock_name, 'Amt': amt, 'Qty': qty})
                         
     if not all_records: return
@@ -309,46 +308,38 @@ def draw_momentum_bump_chart(target_cat, etf_dict):
     df_amt = pd.DataFrame(all_records)
     df_amt['Date'] = pd.to_datetime(df_amt['Date'])
     
-    # 💡 [업그레이드 2] 금액(Amt)과 수량(Qty)을 동시에 일자별/종목별로 합산합니다.
     daily_sum = df_amt.groupby(['Date', 'Stock']).agg({'Amt': 'sum', 'Qty': 'sum'}).reset_index()
     
-    # 금액 피벗 & 5일 롤링
     pivot_amt = daily_sum.pivot(index='Date', columns='Stock', values='Amt').fillna(0).sort_index()
     rolling_5d_amt = pivot_amt.rolling(window=5, min_periods=1).sum()
     
-    # 수량 피벗 & 5일 롤링
     pivot_qty = daily_sum.pivot(index='Date', columns='Stock', values='Qty').fillna(0).sort_index()
     rolling_5d_qty = pivot_qty.rolling(window=5, min_periods=1).sum()
     
-    # 명예의 전당 추출
+    # 💡 [핵심 패치 1] Top 20에서 Top 10으로 압축하여 가독성을 극대화합니다!
     target_universe = set()
     for date in rolling_5d_amt.index:
-        daily_top20 = rolling_5d_amt.loc[date].nlargest(20).index.tolist()
-        target_universe.update(daily_top20)
+        daily_top10 = rolling_5d_amt.loc[date].nlargest(10).index.tolist()
+        target_universe.update(daily_top10)
         
     if not target_universe: return
     
-    # 금액 데이터 Melt
     universe_amt = rolling_5d_amt[list(target_universe)].reset_index().melt(id_vars='Date', var_name='Stock', value_name='Rolling_5d_Amount')
-    # 수량 데이터 Melt
     universe_qty = rolling_5d_qty[list(target_universe)].reset_index().melt(id_vars='Date', var_name='Stock', value_name='Rolling_5d_Qty')
     
-    # 금액과 수량 데이터를 하나로 합치기
     long_df = pd.merge(universe_amt, universe_qty, on=['Date', 'Stock'])
     
-    # 💡 [업그레이드 3: 공백 메우기] method='first'를 사용하여 금액이 0으로 똑같더라도 공동 순위 대신 25, 26, 27등으로 강제 분산시킵니다.
     long_df['Rank'] = long_df.groupby('Date')['Rolling_5d_Amount'].rank(method='first', ascending=False)
     long_df['Date_str'] = long_df['Date'].dt.strftime('%m-%d')
     long_df = long_df.sort_values(['Date', 'Rank'])
     
-    # 💡 [업그레이드 4: 수량 텍스트 포맷팅] 빨강/파랑 화살표 기호를 입혀줍니다.
     def format_qty_str(qty):
         if pd.isna(qty) or qty == 0: return "0"
         if qty > 0: return f"🔴▲ {int(qty):,}"
         else: return f"🔵▼ {abs(int(qty)):,}"
         
     long_df['수량(5일 누적)'] = long_df['Rolling_5d_Qty'].apply(format_qty_str)
-    long_df = long_df.rename(columns={'Rolling_5d_Amount': '순매수(백만)'}) # 툴팁에 예쁘게 보이게 이름 변경
+    long_df = long_df.rename(columns={'Rolling_5d_Amount': '순매수(백만)'})
     
     fig = px.line(
         long_df, 
@@ -356,23 +347,23 @@ def draw_momentum_bump_chart(target_cat, etf_dict):
         y='Rank', 
         color='Stock', 
         markers=True,
-        # 💡 [업그레이드 5] 마우스를 올리면 순매수(금액)과 수량(빨강/파랑)이 동시에 보이도록 세팅합니다.
         hover_data={
             'Rank': True,
             '순매수(백만)': ':,.1f',
             '수량(5일 누적)': True, 
             'Date_str': False
         },
-        title=f"🏆 [{target_cat}] 찐 주도주 20일 수급 로테이션 (최근 5일 누적 순매수액 기준)"
+        title=f"🏆 [{target_cat}] 찐 주도주 20일 수급 로테이션 (최근 5일 누적 순매수액 <b>Top 10</b> 기준)"
     )
     
-    # dtick=1을 제거하여, 종목이 많을 때 Y축 숫자가 너무 빽빽하게 겹치지 않고 자동으로 조절되게 만듭니다.
     fig.update_yaxes(autorange="reversed", title="순위 (합산 금액 기준)")
     fig.update_xaxes(title="날짜 (월-일)", type='category')
     fig.update_traces(line=dict(width=3), marker=dict(size=8))
+    
+    # 💡 [핵심 패치 2] hovermode="closest" 로 변경하여 마우스가 위치한 단 1개의 점(종목)만 깔끔하게 보여줍니다!
     fig.update_layout(
         font=dict(color="#FFFFFF"), template="plotly_dark", plot_bgcolor='#121212', paper_bgcolor='#121212',
-        height=650, hovermode="x unified", legend_title_text='주도주 라인업'
+        height=650, hovermode="closest", legend_title_text='주도주 라인업'
     )
     
     st.plotly_chart(fig, use_container_width=True, key=f"momentum_bump_{target_cat}")
