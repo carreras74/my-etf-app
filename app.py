@@ -403,9 +403,10 @@ def draw_momentum_bump_chart(target_cat, etf_dict, backup_df):
         for s in qty_change_matrix.columns:
             temp_qty[s] -= qty_change_matrix.loc[d, s]
             
-    # 6. 💡 [핵심 패치] '보유총액(Total Value)' 매트릭스 생성
+    # 6. 💡 '보유총액(Total Value)' 매트릭스 생성 및 KeyError 방지용 인덱스 이름표 부착
     common_cols = list(set(price_matrix.columns) & set(qty_matrix.columns))
     total_val_matrix = (qty_matrix[common_cols] * price_matrix[common_cols]) / 1000000.0
+    total_val_matrix.index.name = 'Date' # 💡 [버그 완벽 차단] 이름표를 명확히 붙입니다.
     
     # 7. 매일매일의 '보유총액' 기준으로 Top 10 추출
     target_universe = set()
@@ -632,6 +633,7 @@ with st.expander("🦅 [히든 대시보드] 내가 원하는 종목을 골라�
         tabs = st.tabs([f"📈 {n}" for n in final_stocks])
         for i, tab in enumerate(tabs):
             with tab: render_stock_3d_chart(final_stocks[i], etf_data, curr_ledger, f"custom_{i}")
+
 
 
 
