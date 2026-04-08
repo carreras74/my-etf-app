@@ -388,12 +388,10 @@ def draw_momentum_bump_chart(target_cat, etf_dict, backup_df):
         if s not in qty_change_matrix.columns: qty_change_matrix[s] = 0
         if s not in price_matrix.columns: price_matrix[s] = np.nan
         
-    # 빈 가격을 채우기 (연속성 확보)
     price_matrix = price_matrix.ffill().bfill()
     for s in price_matrix.columns:
         price_matrix[s] = price_matrix[s].fillna(latest_prices.get(s, 0))
 
-    # 수량 역산 계산
     qty_matrix = pd.DataFrame(index=all_dates_asc, columns=qty_change_matrix.columns)
     temp_qty = {s: brand_current_qty.get(s, 0) for s in qty_change_matrix.columns}
     
@@ -403,26 +401,29 @@ def draw_momentum_bump_chart(target_cat, etf_dict, backup_df):
         for s in qty_change_matrix.columns:
             temp_qty[s] -= qty_change_matrix.loc[d, s]
             
-    # 6. 💡 '보유총액(Total Value)' 매트릭스 생성 및 KeyError 방지용 인덱스 이름표 부착
+    # '보유총액(Total Value)' 매트릭스 생성
     common_cols = list(set(price_matrix.columns) & set(qty_matrix.columns))
     total_val_matrix = (qty_matrix[common_cols] * price_matrix[common_cols]) / 1000000.0
-    total_val_matrix.index.name = 'Date' # 💡 [버그 완벽 차단] 이름표를 명확히 붙입니다.
+    total_val_matrix.index.name = 'Date' 
     
-    # 7. 매일매일의 '보유총액' 기준으로 Top 10 추출
+    # 💡 [버그 완벽 수정] 찐 주도주 유니버스 선정 엔진 복구!
+    # 기준: '5일 누적 순매수' 매일 상위 10종목 (막대그래프와 동일한 기준)
+    pivot_amt = daily_sum.pivot(index='Date', columns='Stock', values='Amt').fillna(0).sort_index()
+    rolling_5d_amt = pivot_amt.rolling(window=5, min_periods=1).sum()
+    
     target_universe = set()
-    for date in total_val_matrix.index:
-        daily_top10 = total_val_matrix.loc[date].astype(float).nlargest(10).index.tolist()
-        daily_top10 = [s for s in daily_top10 if total_val_matrix.loc[date, s] > 0] # 가치가 0인 종목은 제외
+    for date in rolling_5d_amt.index:
+        daily_top10 = rolling_5d_amt.loc[date].nlargest(10).index.tolist()
         target_universe.update(daily_top10)
         
     if not target_universe: return
     
-    # 차트 렌더링용 데이터 변환
-    universe_val = total_val_matrix[list(target_universe)].reset_index().melt(id_vars='Date', var_name='Stock', value_name='Total_Value')
+    safe_universe = [s for s in target_universe if s in total_val_matrix.columns]
+    universe_val = total_val_matrix[safe_universe].reset_index().melt(id_vars='Date', var_name='Stock', value_name='Total_Value')
     long_df = universe_val.copy()
     long_df['Total_Value'] = long_df['Total_Value'].astype(float)
     
-    # 8. 💡 [순위 기준 변경] 선이 오르내리는 기준(Rank)을 '보유총액'으로 세팅
+    # 💡 순위 기준: 뽑힌 주도주들 사이에서의 '보유총액' 순위
     long_df['Rank'] = long_df.groupby('Date')['Total_Value'].rank(method='first', ascending=False)
     long_df['Date_str'] = long_df['Date'].dt.strftime('%m-%d')
     long_df = long_df.sort_values(['Date', 'Rank'])
@@ -447,7 +448,6 @@ def draw_momentum_bump_chart(target_cat, etf_dict, backup_df):
     num_stocks_mom = len(latest_order)
     dynamic_height_mom = max(650, num_stocks_mom * 25 + 100)
     
-    # 9. 시각화 (보유총액 우선 정렬)
     fig = px.line(
         long_df, 
         x='Date_str', 
@@ -463,7 +463,7 @@ def draw_momentum_bump_chart(target_cat, etf_dict, backup_df):
             '당일 수량(주)': True, 
             'Date_str': False
         },
-        title=f"🏆 [{target_cat}] 찐 주도주 15일 수급 로테이션 (<b>보유총액 Top 10</b> 기준)"
+        title=f"🏆 [{target_cat}] 찐 주도주 15일 수급 로테이션 (<b>5일 누적 순매수 Top 10</b> 종목의 <b>보유총액</b> 순위)"
     )
     
     fig.update_yaxes(autorange="reversed", title="순위 (보유총액 기준)")
