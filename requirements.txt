@@ -1,6 +1,7 @@
 streamlit
-gspread
 pandas
 plotly
-pytz
+finance-datareader
+pykrx
 openpyxl
+gspread
