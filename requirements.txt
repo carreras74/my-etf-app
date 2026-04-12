@@ -5,6 +5,6 @@ finance-datareader
 pykrx
 openpyxl
 gspread
-setuptools
-# 업데이트용 빈줄
+setuptools==69.5.1
+
 
