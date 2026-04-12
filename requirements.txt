@@ -6,3 +6,5 @@ pykrx
 openpyxl
 gspread
 setuptools
+# 업데이트용 빈줄
+
