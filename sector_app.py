@@ -45,14 +45,12 @@ def load_all_data_from_gs():
         SHEET_URL = 'https://docs.google.com/spreadsheets/d/1ZxIYeERuOWOWZudyjpMWpEWA0eljOct_uO9gXg6_2JA/edit'
         sh = gc.open_by_url(SHEET_URL)
         
-        # 1. 섹터 사전
         ws_dict = sh.worksheet("섹터사전")
         df_dict = pd.DataFrame(ws_dict.get_all_records())
         cols_dict = df_dict.columns.tolist()
         target_col = '섹터명' if '섹터명' in cols_dict else ('섹터' if '섹터' in cols_dict else None)
         mapping = dict(zip(df_dict['종목명'].apply(clean_name), df_dict[target_col])) if target_col else {}
         
-        # 2. 인포스탁
         ws_theme = sh.worksheet("인포스탁")
         df_theme = pd.DataFrame(ws_theme.get_all_records())
         
@@ -60,7 +58,6 @@ def load_all_data_from_gs():
             df_theme = df_theme[df_theme['편입종목'].notna()]
             df_theme['편입종목'] = df_theme['편입종목'].astype(str)
             
-        # 💡 [핵심] 날짜 컬럼을 문자열로 확실히 처리
         if '날짜' in df_theme.columns:
             df_theme['날짜'] = df_theme['날짜'].astype(str).str.strip()
             
@@ -73,7 +70,6 @@ def load_all_data_from_gs():
 def get_combined_market_data(lookback_days):
     today = datetime.datetime.now()
     
-    # 1일 무적 패스 (KRX 우회)
     if lookback_days == 1:
         try:
             df_fdr = fdr.StockListing('KRX')
@@ -91,7 +87,6 @@ def get_combined_market_data(lookback_days):
         except Exception:
              pass
 
-    # 다일(Multi-day) 로직
     past_limit = today - datetime.timedelta(days=40)
     try:
         df_samsung = stock.get_market_ohlcv(past_limit.strftime("%Y%m%d"), today.strftime("%Y%m%d"), "005930")
@@ -121,17 +116,13 @@ sector_dict, df_theme_full = load_all_data_from_gs()
 
 with st.sidebar:
     st.header("⚙️ 분석 설정")
-    
-    # 💡 [핵심 추가] 시트에 '날짜' 컬럼이 있으면 달력 생성
     target_df_theme = df_theme_full
     if not df_theme_full.empty and '날짜' in df_theme_full.columns:
-        # 빈 날짜 제외하고 내림차순(최신순) 정렬
-        valid_dates = [d for d in df_theme_full['날짜'].unique() if d]
+        valid_dates = [d for d in df_theme_full['날짜'].unique() if d and d != 'nan']
         available_dates = sorted(valid_dates, reverse=True)
         
         if available_dates:
             selected_date = st.selectbox("📅 분석할 테마 일자", options=available_dates)
-            # 선택한 날짜의 테마 데이터만 필터링
             target_df_theme = df_theme_full[df_theme_full['날짜'] == selected_date]
     else:
         st.warning("💡 구글 시트에 '날짜' 컬럼을 추가하시면 일자별 조회가 가능합니다.")
@@ -206,7 +197,7 @@ if not target_df_theme.empty and sector_dict:
     clean_df = rolling_df.drop(columns=["기타"], errors='ignore')
     top_30 = clean_df.iloc[-1].sort_values(ascending=False).head(30).index.tolist()
 
-    # 상단: 당일 강도
+    # (1) 상단: 당일 강도
     st.subheader(f"📊 섹터별 수익률 강도 (TOP 30)")
     today_data = clean_df.loc[clean_df.index[-1], top_30].reset_index()
     today_data.columns = ['섹터', '수익률']
@@ -219,7 +210,7 @@ if not target_df_theme.empty and sector_dict:
 
     st.markdown("---")
 
-    # 하단: 범프 차트
+    # (2) 중단: 범프 차트
     st.subheader(f"📈 최근 {lookback_days}영업일 섹터 순위 변화 (범프 차트)")
     rank_df = clean_df[top_30].rank(axis=1, ascending=False, method='min')
     bump_data = rank_df.reset_index().melt(id_vars='index', var_name='섹터', value_name='순위')
@@ -227,14 +218,55 @@ if not target_df_theme.empty and sector_dict:
         bump_data, x='index', y='순위', color='섹터', markers=True, category_orders={"섹터": top_30}
     )
     fig_bump.update_layout(template="plotly_dark", height=700, yaxis=dict(autorange="reversed", dtick=1))
-    
     for trace in fig_bump.data:
         trace.line.width = 4 if trace.name in top_30[:5] else 1.2
     st.plotly_chart(fig_bump, use_container_width=True)
 
     st.markdown("---")
-    target_sector = st.selectbox("🔍 섹터 상세 종목 분석:", options=top_30)
-    st.dataframe(base_df[base_df['섹터'] == target_sector], use_container_width=True)
+    
+    # =====================================================================
+    # (3) 하단: 섹터 상세 종목 분석 (세로형 막대그래프 추가)
+    # =====================================================================
+    st.subheader("🔍 섹터 내 개별 종목 수익률 분석")
+    target_sector = st.selectbox("분석할 섹터를 선택하세요:", options=top_30)
+    
+    # 해당 섹터 종목들 필터링
+    sector_stocks = base_df[base_df['섹터'] == target_sector].copy()
+    
+    # 개별 종목 수익률 계산 (추적 기간 전체 누적 수익률)
+    latest_dt = b_days[-1]
+    returns_list = []
+    for _, row in sector_stocks.iterrows():
+        p0 = hist_prices[base_date].get(row['코드'])
+        p1 = hist_prices[latest_dt].get(row['코드'])
+        if p0 and p1 and p0 > 0:
+            returns_list.append(((p1 - p0) / p0) * 100)
+        else:
+            returns_list.append(0.0)
+            
+    sector_stocks['수익률(%)'] = returns_list
+    sector_stocks = sector_stocks.sort_values('수익률(%)', ascending=False)
+    
+    # 세로형 막대 그래프 그리기
+    fig_stock = px.bar(
+        sector_stocks, x='종목명', y='수익률(%)',
+        color='수익률(%)', color_continuous_scale='RdBu_r',
+        text_auto='.2f'
+    )
+    fig_stock.update_layout(
+        template="plotly_dark", 
+        height=500, 
+        coloraxis_showscale=False,
+        xaxis_tickangle=-45 # 종목명이 길 수 있으므로 비스듬하게 표시
+    )
+    st.plotly_chart(fig_stock, use_container_width=True)
+    
+    # 원본 데이터 표 (접기/펴기 형태로 깔끔하게 배치)
+    with st.expander("데이터 표로 보기"):
+        st.dataframe(
+            sector_stocks[['종목명', '코드', '수익률(%)']].style.background_gradient(cmap='RdYlBu_r', subset=['수익률(%)']), 
+            use_container_width=True, hide_index=True
+        )
 
 else:
     st.warning("⚠️ 구글 시트 설정을 확인해주세요. '섹터사전'과 '인포스탁' 탭이 필요합니다.")
