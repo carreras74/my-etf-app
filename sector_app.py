@@ -4,7 +4,6 @@ import plotly.express as px
 import FinanceDataReader as fdr
 from pykrx import stock
 import datetime
-import numpy as np
 import time
 import gspread
 import os
@@ -27,7 +26,7 @@ st.title("🧩 스마트머니 섹터 로테이션 & 주도주 해부")
 st.info("✅ 구글 시트의 '인포스탁' 및 '섹터사전' 탭 데이터를 기반으로 자동 분석합니다.")
 
 # =====================================================================
-# 2. 데이터 엔진 (구글 시트 & 거래소 통합 로더)
+# 2. 데이터 엔진
 # =====================================================================
 
 def clean_name(name):
@@ -64,32 +63,38 @@ def load_all_data_from_gs():
 def get_combined_market_data(lookback_days):
     today = datetime.datetime.now()
     
-    # 💡 [핵심 복구] 1일 선택 시 pykrx를 100% 우회하는 '초고속 마법 패스'
+    # 💡 [우회 패스 최우선 실행] 1일 선택 시 pykrx 호출 전에 바로 네이버 금융으로 빠짐
     if lookback_days == 1:
         try:
             df_fdr = fdr.StockListing('KRX')
+            # 네이버 금융 등락률 컬럼 확인
             ratio_col = next((c for c in ['ChagesRatio', 'ChangesRatio'] if c in df_fdr.columns), None)
             if ratio_col:
                 yesterday = today - datetime.timedelta(days=1)
                 hist_prices = {yesterday: {}, today: {}}
                 
-                # 기존 로직(p1-p0/p0)이 깨지지 않도록 가짜 기준가(100) 생성
+                # 수익률 계산을 위해 가상의 가격(어제 100, 오늘 100 + 등락률)을 넣어줌
                 for _, row in df_fdr.iterrows():
                     code = row['Code']
                     ratio = pd.to_numeric(row[ratio_col], errors='coerce')
                     if pd.isna(ratio): ratio = 0.0
                     
                     hist_prices[yesterday][code] = 100
-                    hist_prices[today][code] = 100 + ratio
+                    hist_prices[today][code] = 100 * (1 + (ratio / 100)) # 수익률 계산식에 맞게 수정
                     
                 return hist_prices, [yesterday, today]
-        except Exception:
-            pass # 우회 실패 시 아래 정규 로직으로 이동
+        except Exception as e:
+             st.error(f"1일 우회 데이터 로드 실패: {e}")
+             pass # 실패 시 아래 정규 로직 시도
 
-    # 3일, 5일, 10일 정규 로직 (IP 차단 위험 존재)
+    # 3일, 5일, 10일 로직 (IP 차단 위험)
     past_limit = today - datetime.timedelta(days=40)
     try:
+        # 달력을 구하는 이 부분에서 차단 에러가 남
         df_samsung = stock.get_market_ohlcv(past_limit.strftime("%Y%m%d"), today.strftime("%Y%m%d"), "005930")
+        if df_samsung.empty:
+            raise Exception("거래소 데이터 비어있음")
+            
         b_days = df_samsung.index.tolist()[-lookback_days:]
         
         hist_prices = {}
@@ -98,7 +103,7 @@ def get_combined_market_data(lookback_days):
         for i, dt in enumerate(b_days):
             dt_str = dt.strftime("%Y%m%d")
             progress_text.text(f"🔄 거래소 데이터 수집 중... ({dt_str})")
-            time.sleep(1.0) # 매너 타임 강화
+            time.sleep(1.0)
             df_cap = pd.concat([
                 stock.get_market_cap(dt_str, market="KOSPI"), 
                 stock.get_market_cap(dt_str, market="KOSDAQ")
@@ -112,11 +117,11 @@ def get_combined_market_data(lookback_days):
         
         progress_text.empty()
         return hist_prices, b_days
-    except:
+    except Exception as e:
         return None, []
 
 # =====================================================================
-# 3. 메인 분석 및 시각화 로직
+# 3. 메인 로직
 # =====================================================================
 with st.sidebar:
     st.header("⚙️ 분석 설정")
@@ -164,7 +169,7 @@ if not df_theme.empty and sector_dict:
             p0 = hist_prices[base_date].get(row['코드'])
             p1 = hist_prices[dt].get(row['코드'])
             if p0 and p1 and p0 > 0:
-                temp_list.append({'섹터': row['섹터'], '수익률': (p1 - p0) / p0 * 100})
+                temp_list.append({'섹터': row['섹터'], '수익률': ((p1 - p0) / p0) * 100})
         
         if temp_list:
             day_avg = pd.DataFrame(temp_list).groupby('섹터')['수익률'].mean()
@@ -177,7 +182,7 @@ if not df_theme.empty and sector_dict:
     clean_df = rolling_df.drop(columns=["기타"], errors='ignore')
     top_30 = clean_df.iloc[-1].sort_values(ascending=False).head(30).index.tolist()
 
-    # (1) 상단 막대 차트
+    # 상단: 당일 강도
     st.subheader(f"📊 당일 섹터별 수익률 강도 (TOP 30)")
     today_data = clean_df.loc[clean_df.index[-1], top_30].reset_index()
     today_data.columns = ['섹터', '수익률']
@@ -190,7 +195,7 @@ if not df_theme.empty and sector_dict:
 
     st.markdown("---")
 
-    # (2) 하단 범프 차트
+    # 하단: 범프 차트
     st.subheader(f"📈 최근 {lookback_days}영업일 섹터 순위 변화 (범프 차트)")
     rank_df = clean_df[top_30].rank(axis=1, ascending=False, method='min')
     bump_data = rank_df.reset_index().melt(id_vars='index', var_name='섹터', value_name='순위')
@@ -203,7 +208,6 @@ if not df_theme.empty and sector_dict:
         trace.line.width = 4 if trace.name in top_30[:5] else 1.2
     st.plotly_chart(fig_bump, use_container_width=True)
 
-    # (3) 하위 상세 종목 분석
     st.markdown("---")
     target_sector = st.selectbox("🔍 섹터 상세 종목 분석:", options=top_30)
     st.dataframe(base_df[base_df['섹터'] == target_sector], use_container_width=True)
