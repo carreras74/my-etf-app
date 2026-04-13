@@ -23,7 +23,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🧩 스마트머니 섹터 로테이션 & 주도주 해부")
-st.info("✅ 구글 시트의 '인포스탁' 및 '섹터사전' 탭 데이터를 기반으로 자동 분석합니다.")
+st.info("✅ 구글 시트에 누적된 '인포스탁' 일자별 데이터를 기반으로 자동 분석합니다.")
 
 # =====================================================================
 # 2. 데이터 엔진
@@ -45,20 +45,25 @@ def load_all_data_from_gs():
         SHEET_URL = 'https://docs.google.com/spreadsheets/d/1ZxIYeERuOWOWZudyjpMWpEWA0eljOct_uO9gXg6_2JA/edit'
         sh = gc.open_by_url(SHEET_URL)
         
+        # 1. 섹터 사전
         ws_dict = sh.worksheet("섹터사전")
         df_dict = pd.DataFrame(ws_dict.get_all_records())
         cols_dict = df_dict.columns.tolist()
         target_col = '섹터명' if '섹터명' in cols_dict else ('섹터' if '섹터' in cols_dict else None)
         mapping = dict(zip(df_dict['종목명'].apply(clean_name), df_dict[target_col])) if target_col else {}
         
+        # 2. 인포스탁
         ws_theme = sh.worksheet("인포스탁")
         df_theme = pd.DataFrame(ws_theme.get_all_records())
         
-        # 💡 [방어 코드 추가] 편입종목이 없는 빈 줄이나 이상한 데이터 삭제
         if '편입종목' in df_theme.columns:
-            df_theme = df_theme[df_theme['편입종목'].notna()] # 빈 칸 제거
-            df_theme['편입종목'] = df_theme['편입종목'].astype(str) # 무조건 문자열로 변환
-        
+            df_theme = df_theme[df_theme['편입종목'].notna()]
+            df_theme['편입종목'] = df_theme['편입종목'].astype(str)
+            
+        # 💡 [핵심] 날짜 컬럼을 문자열로 확실히 처리
+        if '날짜' in df_theme.columns:
+            df_theme['날짜'] = df_theme['날짜'].astype(str).str.strip()
+            
         return mapping, df_theme
     except Exception as e:
         st.error(f"⚠️ 구글 시트 연결 실패: {e}")
@@ -68,6 +73,7 @@ def load_all_data_from_gs():
 def get_combined_market_data(lookback_days):
     today = datetime.datetime.now()
     
+    # 1일 무적 패스 (KRX 우회)
     if lookback_days == 1:
         try:
             df_fdr = fdr.StockListing('KRX')
@@ -75,46 +81,34 @@ def get_combined_market_data(lookback_days):
             if ratio_col:
                 yesterday = today - datetime.timedelta(days=1)
                 hist_prices = {yesterday: {}, today: {}}
-                
                 for _, row in df_fdr.iterrows():
                     code = row['Code']
                     ratio = pd.to_numeric(row[ratio_col], errors='coerce')
                     if pd.isna(ratio): ratio = 0.0
-                    
                     hist_prices[yesterday][code] = 100
                     hist_prices[today][code] = 100 * (1 + (ratio / 100))
-                    
                 return hist_prices, [yesterday, today]
-        except Exception as e:
-             st.error(f"1일 우회 데이터 로드 실패: {e}")
+        except Exception:
              pass
 
+    # 다일(Multi-day) 로직
     past_limit = today - datetime.timedelta(days=40)
     try:
         df_samsung = stock.get_market_ohlcv(past_limit.strftime("%Y%m%d"), today.strftime("%Y%m%d"), "005930")
-        if df_samsung.empty:
-            raise Exception("거래소 데이터 비어있음")
-            
+        if df_samsung.empty: raise Exception("거래소 데이터 비어있음")
         b_days = df_samsung.index.tolist()[-lookback_days:]
-        
         hist_prices = {}
         progress_text = st.empty()
-        
         for i, dt in enumerate(b_days):
             dt_str = dt.strftime("%Y%m%d")
             progress_text.text(f"🔄 거래소 데이터 수집 중... ({dt_str})")
             time.sleep(1.0)
-            df_cap = pd.concat([
-                stock.get_market_cap(dt_str, market="KOSPI"), 
-                stock.get_market_cap(dt_str, market="KOSDAQ")
-            ])
+            df_cap = pd.concat([stock.get_market_cap(dt_str, market="KOSPI"), stock.get_market_cap(dt_str, market="KOSDAQ")])
             hist_prices[dt] = df_cap['종가'].to_dict()
-        
         time.sleep(1.0)
         fdr_curr = fdr.StockListing('KRX')
         hist_prices[today] = dict(zip(fdr_curr['Code'], fdr_curr['Close']))
         b_days.append(today)
-        
         progress_text.empty()
         return hist_prices, b_days
     except Exception as e:
@@ -123,14 +117,29 @@ def get_combined_market_data(lookback_days):
 # =====================================================================
 # 3. 메인 로직
 # =====================================================================
+sector_dict, df_theme_full = load_all_data_from_gs()
+
 with st.sidebar:
     st.header("⚙️ 분석 설정")
+    
+    # 💡 [핵심 추가] 시트에 '날짜' 컬럼이 있으면 달력 생성
+    target_df_theme = df_theme_full
+    if not df_theme_full.empty and '날짜' in df_theme_full.columns:
+        # 빈 날짜 제외하고 내림차순(최신순) 정렬
+        valid_dates = [d for d in df_theme_full['날짜'].unique() if d]
+        available_dates = sorted(valid_dates, reverse=True)
+        
+        if available_dates:
+            selected_date = st.selectbox("📅 분석할 테마 일자", options=available_dates)
+            # 선택한 날짜의 테마 데이터만 필터링
+            target_df_theme = df_theme_full[df_theme_full['날짜'] == selected_date]
+    else:
+        st.warning("💡 구글 시트에 '날짜' 컬럼을 추가하시면 일자별 조회가 가능합니다.")
+
     lookback_days = st.selectbox("⏱️ 추적 기간 (차단 시 1일 권장)", options=[1, 3, 5, 10], index=0, format_func=lambda x: f"{x}영업일")
     if st.button("🔄 데이터 강제 새로고침"):
         st.cache_data.clear()
         st.rerun()
-
-sector_dict, df_theme = load_all_data_from_gs()
 
 @st.cache_data
 def get_krx_mapping():
@@ -139,10 +148,9 @@ def get_krx_mapping():
 
 krx_mapping = get_krx_mapping()
 
-if not df_theme.empty and sector_dict:
-    # 💡 [방어 코드 추가] '편입종목' 컬럼 확인
-    if '편입종목' not in df_theme.columns:
-        st.error("🚨 구글 시트 '인포스탁' 탭에 '편입종목' 컬럼이 없습니다. 데이터를 확인해주세요.")
+if not target_df_theme.empty and sector_dict:
+    if '편입종목' not in target_df_theme.columns:
+        st.error("🚨 구글 시트 '인포스탁' 탭에 '편입종목' 컬럼이 없습니다.")
         st.stop()
 
     hist_prices, b_days = get_combined_market_data(lookback_days)
@@ -152,11 +160,9 @@ if not df_theme.empty and sector_dict:
         st.stop()
 
     theme_stocks = []
-    for _, row in df_theme.iterrows():
-        # 💡 [안전하게 텍스트만 처리]
+    for _, row in target_df_theme.iterrows():
         raw_stocks = str(row.get('편입종목', ''))
-        if not raw_stocks or raw_stocks == 'nan':
-            continue
+        if not raw_stocks or raw_stocks == 'nan': continue
             
         for s_name in raw_stocks.split(','):
             s_name = s_name.strip()
@@ -170,7 +176,7 @@ if not df_theme.empty and sector_dict:
                 })
     
     if not theme_stocks:
-        st.warning("⚠️ 유효한 종목을 찾지 못했습니다. 구글 시트의 데이터를 다시 확인해주세요.")
+        st.warning("⚠️ 선택한 날짜에 유효한 종목을 찾지 못했습니다.")
         st.stop()
 
     base_df = pd.DataFrame(theme_stocks).drop_duplicates('종목명')
@@ -200,7 +206,8 @@ if not df_theme.empty and sector_dict:
     clean_df = rolling_df.drop(columns=["기타"], errors='ignore')
     top_30 = clean_df.iloc[-1].sort_values(ascending=False).head(30).index.tolist()
 
-    st.subheader(f"📊 당일 섹터별 수익률 강도 (TOP 30)")
+    # 상단: 당일 강도
+    st.subheader(f"📊 섹터별 수익률 강도 (TOP 30)")
     today_data = clean_df.loc[clean_df.index[-1], top_30].reset_index()
     today_data.columns = ['섹터', '수익률']
     fig_bar = px.bar(
@@ -212,6 +219,7 @@ if not df_theme.empty and sector_dict:
 
     st.markdown("---")
 
+    # 하단: 범프 차트
     st.subheader(f"📈 최근 {lookback_days}영업일 섹터 순위 변화 (범프 차트)")
     rank_df = clean_df[top_30].rank(axis=1, ascending=False, method='min')
     bump_data = rank_df.reset_index().melt(id_vars='index', var_name='섹터', value_name='순위')
