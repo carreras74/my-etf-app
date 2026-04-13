@@ -26,11 +26,31 @@ st.title("🧩 스마트머니 섹터 로테이션 & 주도주 해부")
 st.info("✅ 구글 시트에 누적된 '인포스탁' 일자별 데이터를 기반으로 안전하게 분석합니다.")
 
 # =====================================================================
-# 2. 데이터 엔진 (안정성 최우선)
+# 2. 데이터 엔진 (철벽 방어 모드)
 # =====================================================================
 
 def clean_name(name):
     return str(name).replace(" ", "").upper().strip()
+
+# 💡 [핵심 추가] FDR 접속 차단 대비 3중 우회 헬퍼 함수
+def get_safe_fdr_listing():
+    """FDR의 GitHub 데이터 로드 실패 시 개별 시장 크롤링으로 우회합니다."""
+    try:
+        df = fdr.StockListing('KRX')
+        if not df.empty: return df
+    except Exception:
+        pass
+        
+    try:
+        time.sleep(0.5)
+        df_kpi = fdr.StockListing('KOSPI')
+        df_kdq = fdr.StockListing('KOSDAQ')
+        df = pd.concat([df_kpi, df_kdq])
+        if not df.empty: return df
+    except Exception:
+        pass
+        
+    return pd.DataFrame()
 
 @st.cache_data(ttl=3600)
 def load_all_data_from_gs():
@@ -66,14 +86,22 @@ def load_all_data_from_gs():
         st.error(f"⚠️ 구글 시트 연결 실패: {e}")
         return {}, pd.DataFrame()
 
+# 💡 [핵심 수정] 종목 이름표는 24시간 동안 캐시(기억)하여 불필요한 차단 방지
+@st.cache_data(ttl=86400)
+def get_krx_mapping():
+    df = get_safe_fdr_listing()
+    if not df.empty and 'Name' in df.columns:
+        return dict(zip(df['Name'].apply(clean_name), df['Code']))
+    return {}
+
 @st.cache_data(ttl=600)
 def get_combined_market_data(lookback_days):
     today = datetime.datetime.now()
     
-    # 💡 1일 선택 시: KRX 완전 우회 (안전 모드)
+    # 1일 선택 시: 우회 패스
     if lookback_days == 1:
         try:
-            df_fdr = fdr.StockListing('KRX')
+            df_fdr = get_safe_fdr_listing()
             ratio_col = next((c for c in ['ChagesRatio', 'ChangesRatio'] if c in df_fdr.columns), None)
             if ratio_col:
                 yesterday = today - datetime.timedelta(days=1)
@@ -88,7 +116,7 @@ def get_combined_market_data(lookback_days):
         except Exception:
              pass
 
-    # 💡 다일 선택 시: 검증된 분할 호출 방식 (매너 타임 적용)
+    # 다일 선택 시: 분할 호출 방식
     past_limit = today - datetime.timedelta(days=40)
     try:
         df_samsung = stock.get_market_ohlcv(past_limit.strftime("%Y%m%d"), today.strftime("%Y%m%d"), "005930")
@@ -101,13 +129,20 @@ def get_combined_market_data(lookback_days):
         for i, dt in enumerate(b_days):
             dt_str = dt.strftime("%Y%m%d")
             progress_text.text(f"🔄 거래소 데이터 수집 중... ({dt_str})")
-            time.sleep(1.0) # IP 차단 방지 매너타임
+            time.sleep(1.0)
             df_cap = pd.concat([stock.get_market_cap(dt_str, market="KOSPI"), stock.get_market_cap(dt_str, market="KOSDAQ")])
             hist_prices[dt] = df_cap['종가'].to_dict()
             
+        # 오늘 실시간가 병합 로직 (FDR 실패 시 pykrx로 자동 전환)
         time.sleep(1.0)
-        fdr_curr = fdr.StockListing('KRX')
-        hist_prices[today] = dict(zip(fdr_curr['Code'], fdr_curr['Close']))
+        fdr_curr = get_safe_fdr_listing()
+        if not fdr_curr.empty and 'Close' in fdr_curr.columns:
+            hist_prices[today] = dict(zip(fdr_curr['Code'], fdr_curr['Close']))
+        else:
+            today_str = today.strftime("%Y%m%d")
+            df_cap_today = pd.concat([stock.get_market_cap(today_str, market="KOSPI"), stock.get_market_cap(today_str, market="KOSDAQ")])
+            hist_prices[today] = df_cap_today['종가'].to_dict()
+            
         b_days.append(today)
         progress_text.empty()
         
@@ -137,11 +172,6 @@ with st.sidebar:
     if st.button("🔄 실시간 주가 새로고침"):
         st.cache_data.clear()
         st.rerun()
-
-@st.cache_data
-def get_krx_mapping():
-    df = fdr.StockListing('KRX')
-    return dict(zip(df['Name'].apply(clean_name), df['Code']))
 
 krx_mapping = get_krx_mapping()
 
@@ -207,7 +237,6 @@ if not target_df_theme.empty and sector_dict:
     # 4. 시각화 영역
     # =====================================================================
 
-    # (1) 상단: 당일 강도
     st.subheader(f"📊 섹터별 수익률 강도 (TOP 30)")
     today_data = clean_df.loc[clean_df.index[-1], top_30].reset_index()
     today_data.columns = ['섹터', '수익률']
@@ -220,7 +249,6 @@ if not target_df_theme.empty and sector_dict:
 
     st.markdown("---")
 
-    # (2) 중단: 범프 차트 (일자별 로테이션 확인)
     st.subheader(f"📈 최근 {lookback_days}영업일 섹터 순위 변화 (범프 차트)")
     rank_df = clean_df[top_30].rank(axis=1, ascending=False, method='min')
     bump_data = rank_df.reset_index().melt(id_vars='index', var_name='섹터', value_name='순위')
@@ -234,7 +262,6 @@ if not target_df_theme.empty and sector_dict:
 
     st.markdown("---")
     
-    # (3) 하단: 섹터 상세 종목 분석 (세로형 막대)
     st.subheader("🔍 섹터 내 개별 종목 수익률 분석")
     target_sector = st.selectbox("분석할 섹터를 선택하세요:", options=top_30)
     
